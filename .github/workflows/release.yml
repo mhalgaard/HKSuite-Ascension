@@ -1,0 +1,48 @@
+name: Release
+
+# Cut a release by pushing a version tag, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package addon
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Stage the addon inside a top-level "HKSuite" folder so the zip
+          # extracts straight into Interface/AddOns as AddOns/HKSuite/.
+          mkdir -p dist/HKSuite
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitignore' \
+            --exclude='CLAUDE.md' \
+            --exclude='dist' \
+            ./ dist/HKSuite/
+
+          # Keep the .toc version in sync with the tag.
+          sed -i "s/^## Version:.*/## Version: ${VERSION}/" dist/HKSuite/HKSuite.toc
+
+          cd dist
+          zip -r "HKSuite-${GITHUB_REF_NAME}.zip" HKSuite
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/HKSuite-${GITHUB_REF_NAME}.zip" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "HKSuite ${GITHUB_REF_NAME}" \
+            --generate-notes
