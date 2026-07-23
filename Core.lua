@@ -174,6 +174,12 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             end
         end
 
+        -- Sort modules alphabetically by title so the Overview list and the
+        -- Interface Options sub-pages appear in alphabetical order.
+        table.sort(ns.modules, function(a, b)
+            return (a.title or "") < (b.title or "")
+        end)
+
         -- Build the Overview page first so module option panels can nest under it.
         if ns.BuildOverview then ns.BuildOverview() end
 

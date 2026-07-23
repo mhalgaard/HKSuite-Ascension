@@ -276,6 +276,18 @@ local function ResolveBundle()
     return toGrab, missing
 end
 
+-- Deliver one at a time; the server only honours one delivery request at a time.
+local bundleQueue, bundleTicker = {}, nil
+local function bundleStep()
+    local e = table.remove(bundleQueue, 1)
+    if not e then
+        if bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
+        return
+    end
+    RequestDeliverVanityCollectionItem(e.id)
+    if #bundleQueue == 0 and bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
+end
+
 function ns.GrabVanityBundle()
     if not ns.IsModuleEnabled("vanity") then return end
     if not (C_VanityCollection and C_VanityCollection.IsCollectionItemOwned and RequestDeliverVanityCollectionItem) then
@@ -284,11 +296,18 @@ function ns.GrabVanityBundle()
     end
     local toGrab, missing = ResolveBundle()
     if #toGrab == 0 then ns.Print("No utility vanity items to grab.") return end
-    for _, e in ipairs(toGrab) do
-        RequestDeliverVanityCollectionItem(e.id)
-    end
-    ns.Print("Grabbed " .. #toGrab .. " utility vanity item(s)" ..
+    if bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
+    bundleQueue = toGrab
+    ns.Print("Grabbing " .. #toGrab .. " utility vanity item(s)" ..
         (#missing > 0 and (" (" .. #missing .. " not owned).") or "."))
+    bundleStep()   -- first immediately, rest on a short interval
+    if #bundleQueue > 0 then
+        if C_Timer and C_Timer.NewTicker then
+            bundleTicker = C_Timer.NewTicker(2, bundleStep)
+        else
+            while #bundleQueue > 0 do bundleStep() end
+        end
+    end
 end
 
 -- ------------------------------------------------- delete warchest duplicates
@@ -349,27 +368,37 @@ function ns.DeleteFelItems()
 end
 
 -- ------------------------------------------------- delete vanity from bags
-local function VanityItemMap()
-    local map = {}
-    if VANITY_ITEMS then
-        for k, v in pairs(VANITY_ITEMS) do
-            if v.itemid then map[v.itemid] = k end
+-- Vanity items are identified by scanning the tooltip for Ascension's
+-- "You own this vanity item" / "collected this appearance" lines — more reliable
+-- than mapping VANITY_ITEMS item IDs to bag items.
+local scanTip = CreateFrame("GameTooltip", "HKSuiteVanityScanTip", nil, "GameTooltipTemplate")
+
+local function isOwnedVanity(bag, slot)
+    scanTip:SetOwner(UIParent, "ANCHOR_NONE")
+    scanTip:ClearLines()
+    scanTip:SetBagItem(bag, slot)
+    for i = 1, scanTip:NumLines() do
+        local fs = _G["HKSuiteVanityScanTipTextLeft" .. i]
+        local text = fs and fs:GetText()
+        if text then
+            local t = text:lower()
+            if t:find("own this vanity item", 1, true) or t:find("collected this appearance", 1, true) then
+                return true
+            end
         end
     end
-    return map
+    return false
 end
 
--- Vanity items whose collection entry you already own (re-grabbable clutter).
+-- All owned vanity items in bags.
 local function ScanCollected()
-    local map = VanityItemMap()
     local found = {}
     for bag = 0, 4 do
         for slot = 1, GetContainerNumSlots(bag) do
             local link = GetContainerItemLink(bag, slot)
-            local id = link and tonumber(link:match("|Hitem:(%d+):"))
-            local vanityID = id and map[id]
-            if vanityID and C_VanityCollection.IsCollectionItemOwned(vanityID) then
-                found[#found + 1] = { bag = bag, slot = slot, id = id, name = bagItemName(link) or ("item:" .. id) }
+            if link and isOwnedVanity(bag, slot) then
+                local id = tonumber(link:match("|Hitem:(%d+):"))
+                found[#found + 1] = { bag = bag, slot = slot, id = id, name = bagItemName(link) or ("item:" .. tostring(id)) }
             end
         end
     end
@@ -378,13 +407,12 @@ end
 
 -- Extra copies of the same vanity item in bags (keeps one of each).
 local function ScanDuplicateCopies()
-    local map = VanityItemMap()
     local kept, found = {}, {}
     for bag = 0, 4 do
         for slot = 1, GetContainerNumSlots(bag) do
             local link = GetContainerItemLink(bag, slot)
             local id = link and tonumber(link:match("|Hitem:(%d+):"))
-            if id and map[id] then
+            if id and isOwnedVanity(bag, slot) then
                 if kept[id] then
                     found[#found + 1] = { bag = bag, slot = slot, id = id, name = bagItemName(link) or ("item:" .. id) }
                 else
@@ -471,11 +499,18 @@ local function BuildOptionsPanel()
     btn:SetPoint("TOPLEFT", gl, "BOTTOMLEFT", 0, -14)
     btn:SetScript("OnClick", ns.GrabVanity)
 
+    -- Fel Warchest grab + its cleanup, side by side.
     local felBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     felBtn:SetSize(210, 24)
     felBtn:SetText("Grab Fel Enchanted Warchest")
     felBtn:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -8)
     felBtn:SetScript("OnClick", function() ns.GrabVanityById(657112, "Fel Enchanted Warchest") end)
+
+    local delFelBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    delFelBtn:SetSize(200, 24)
+    delFelBtn:SetText("Delete Fel Warchest items")
+    delFelBtn:SetPoint("LEFT", felBtn, "RIGHT", 8, 0)
+    delFelBtn:SetScript("OnClick", ns.DeleteFelItems)
 
     local bundleBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     bundleBtn:SetSize(210, 24)
@@ -488,21 +523,10 @@ local function BuildOptionsPanel()
     bundleHint:SetWidth(360); bundleHint:SetJustifyH("LEFT")
     bundleHint:SetText("Collects your utility vanity items (anvils, call boards, altars, retreat scrolls, and more).")
 
-    local delBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    delBtn:SetSize(210, 24)
-    delBtn:SetText("Delete Fel Warchest items")
-    delBtn:SetPoint("TOPLEFT", bundleHint, "BOTTOMLEFT", -2, -18)
-    delBtn:SetScript("OnClick", ns.DeleteFelItems)
-
-    local delHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    delHint:SetPoint("TOPLEFT", delBtn, "BOTTOMLEFT", 2, -6)
-    delHint:SetWidth(360); delHint:SetJustifyH("LEFT")
-    delHint:SetText("Removes the Fel Enchanted Warchest's leftover items from your bags.")
-
     local collectedBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     collectedBtn:SetSize(210, 24)
     collectedBtn:SetText("Delete collected vanity items")
-    collectedBtn:SetPoint("TOPLEFT", delHint, "BOTTOMLEFT", -2, -14)
+    collectedBtn:SetPoint("TOPLEFT", bundleHint, "BOTTOMLEFT", -2, -16)
     collectedBtn:SetScript("OnClick", ns.DeleteCollectedVanity)
 
     local collectedHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")

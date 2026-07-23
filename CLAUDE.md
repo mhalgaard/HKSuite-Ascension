@@ -51,6 +51,13 @@ When creating a new module:
 
 See `Modules/QuestAutomation.lua` as the reference implementation.
 
+## Rule: modules are listed alphabetically
+The Overview list and the Interface Options sub-pages must stay in **alphabetical
+order by module title**. This is handled centrally — Core sorts `ns.modules` by
+`title` before building the Overview and calling `OnInit` — so a new module slots
+into the right place automatically just by having a `title`. Don't rely on toc
+load order for display order.
+
 ## Settings scope (account vs per-character)
 Settings live in `HKSuiteDB` (account, `## SavedVariables`) or `HKSuiteCharDB`
 (per-character, `## SavedVariablesPerCharacter`). Each character chooses, per
