@@ -78,9 +78,11 @@ C:\Ascension\Launcher\resources\ascension-live\Interface\AddOns\HKSuite
 
 PowerShell:
 ```powershell
-robocopy "c:\Projects\HKSuite" "C:\Ascension\Launcher\resources\ascension-live\Interface\AddOns\HKSuite" /MIR /NFL /NDL /NJH /NJS
+robocopy "c:\Projects\HKSuite" "C:\Ascension\Launcher\resources\ascension-live\Interface\AddOns\HKSuite" /MIR /XD ".git" ".github" /NFL /NDL /NJH /NJS
 ```
-(`/MIR` mirrors the folder, so deletions/renames are reflected too.)
+(`/MIR` mirrors the folder, so deletions/renames are reflected too. Run it from
+**PowerShell**, not Git Bash — bash mangles the `/MIR` flags into paths. `/XD`
+excludes the `.git`/`.github` dev folders from the game copy.)
 
 After copying, the game must reload to pick up Lua changes: `/reload` in-game, or
 log out to character select and back in. New/removed files require a full client

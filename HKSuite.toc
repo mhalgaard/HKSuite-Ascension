@@ -1,12 +1,17 @@
 ## Interface: 30300
 ## Title: HKSuite
 ## Notes: A suite of quality-of-life utilities for Project Ascension
-## Author: mikkel
-## Version: 0.1.0
+## Author: mhalgaard
+## Version: 1.0.0
 ## SavedVariables: HKSuiteDB
 
 Core.lua
 Overview.lua
 Modules\QuestAutomation.lua
 Modules\AutoDelete.lua
+Modules\Social.lua
+Modules\System.lua
+Modules\LootRoller.lua
+Modules\AutoSummonPets.lua
+Modules\AddonButton.lua
 Modules\Scratch.lua
