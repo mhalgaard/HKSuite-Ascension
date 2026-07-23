@@ -225,8 +225,8 @@ local BUNDLE = {
     { id = 499428,  name = "Raid Marker - Bundle" },
     { id = 134985,  name = "Personal Bank" },
     { id = 1180097, name = "Realm Bank" },
-    { id = 977025,  name = "Feather of Ancients: Azeroth" },
-    { id = 134989,  name = "Feather of Ancients: Azeroth" },
+    { id = 977025,  name = "Feather of Ancients: Azeroth", group = "feather" },
+    { id = 134989,  name = "Feather of Ancients: Azeroth", group = "feather" },
     { id = 2903513, name = "Mechanical Mystic Altar" },
     { id = 203955,  name = "Altar of Ancient Kings" },
     { id = 8210202, name = "Altar of the Black Harvest" },
@@ -262,10 +262,20 @@ local function ResolveBundle()
     if fac then for _, e in ipairs(fac) do list[#list + 1] = e end end
 
     local seenId, missSeen, toGrab, missing = {}, {}, {}, {}
+    local groupChosen, groupSeen, groupName = {}, {}, {}
     for _, e in ipairs(list) do
         if not seenId[e.id] then
             seenId[e.id] = true
-            if C_VanityCollection.IsCollectionItemOwned(e.id) then
+            local owned = C_VanityCollection.IsCollectionItemOwned(e.id)
+            if e.group then
+                -- Grouped entries are alternatives: grab only the first owned one.
+                groupSeen[e.group] = true
+                groupName[e.group] = e.name
+                if owned and not groupChosen[e.group] then
+                    groupChosen[e.group] = true
+                    toGrab[#toGrab + 1] = { id = e.id, name = e.name }
+                end
+            elseif owned then
                 toGrab[#toGrab + 1] = { id = e.id, name = e.name }
             elseif not missSeen[e.name] then
                 missSeen[e.name] = true
@@ -273,11 +283,58 @@ local function ResolveBundle()
             end
         end
     end
+    -- A group with nothing owned counts as one missing entry.
+    for g in pairs(groupSeen) do
+        if not groupChosen[g] then missing[#missing + 1] = groupName[g] end
+    end
     return toGrab, missing
 end
 
--- Deliver one at a time; the server only honours one delivery request at a time.
+-- Deliver one at a time (the server only honours one delivery request at a time),
+-- with a progress dialog.
 local bundleQueue, bundleTicker = {}, nil
+local bundleTotal, bundleDone = 0, 0
+local bundleFrame
+
+local function EnsureBundleFrame()
+    if bundleFrame then return bundleFrame end
+    local f = CreateFrame("Frame", "HKSuiteBundleProgress", UIParent)
+    f:SetSize(360, 130)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 16,
+        insets = { left = 6, right = 6, top = 6, bottom = 6 },
+    })
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetScript("OnMouseDown", function(self) self:StartMoving() end)
+    f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
+
+    local title = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    title:SetPoint("TOP", 0, -14)
+    title:SetText("HKSuite — Grabbing Vanity Bundle")
+
+    f.status = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    f.status:SetPoint("TOP", 0, -40)
+    f.status:SetWidth(330); f.status:SetJustifyH("CENTER")
+
+    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    cancel:SetSize(120, 24)
+    cancel:SetPoint("BOTTOM", 0, 14)
+    cancel:SetText("Cancel / Close")
+    cancel:SetScript("OnClick", function()
+        if bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
+        bundleQueue = {}
+        f:Hide()
+    end)
+
+    bundleFrame = f
+    return f
+end
+
 local function bundleStep()
     local e = table.remove(bundleQueue, 1)
     if not e then
@@ -285,7 +342,14 @@ local function bundleStep()
         return
     end
     RequestDeliverVanityCollectionItem(e.id)
-    if #bundleQueue == 0 and bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
+    bundleDone = bundleDone + 1
+    if bundleFrame then
+        bundleFrame.status:SetText(("Grabbing %d / %d:\n%s"):format(bundleDone, bundleTotal, e.name))
+    end
+    if #bundleQueue == 0 then
+        if bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
+        if bundleFrame then bundleFrame.status:SetText(("Done — grabbed %d item(s)."):format(bundleDone)) end
+    end
 end
 
 function ns.GrabVanityBundle()
@@ -296,10 +360,15 @@ function ns.GrabVanityBundle()
     end
     local toGrab, missing = ResolveBundle()
     if #toGrab == 0 then ns.Print("No utility vanity items to grab.") return end
+
     if bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
-    bundleQueue = toGrab
-    ns.Print("Grabbing " .. #toGrab .. " utility vanity item(s)" ..
-        (#missing > 0 and (" (" .. #missing .. " not owned).") or "."))
+    bundleQueue, bundleTotal, bundleDone = toGrab, #toGrab, 0
+
+    local f = EnsureBundleFrame()
+    f:Show()
+    f.status:SetText(("Grabbing %d item(s)…%s"):format(bundleTotal,
+        #missing > 0 and ("\n(" .. #missing .. " not owned)") or ""))
+
     bundleStep()   -- first immediately, rest on a short interval
     if #bundleQueue > 0 then
         if C_Timer and C_Timer.NewTicker then
