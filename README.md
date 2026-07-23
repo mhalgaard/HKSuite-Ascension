@@ -18,6 +18,13 @@ type **`/hk`**. `/rl` is a shortcut for `/reload` (only if no other addon claims
 it). The top-level **HKSuite** page is an Overview with an enable/disable toggle
 for every module; each module has its own settings sub-page.
 
+### Account-wide vs per-character
+Settings are **account-wide by default** (shared across all characters). On the
+Overview, each module has a **Shared** checkbox — uncheck it to give the current
+character its own settings for that module (seeded from the account settings).
+Bulk **All shared** / **All per-character** buttons are provided. Scope changes
+apply after a reload.
+
 ## Modules
 
 ### Quest Automation

@@ -80,23 +80,68 @@ function ns.BuildOverview()
 
     local subtitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    subtitle:SetText("Modules — enable or disable each utility. Configure each one on its sub-page.")
+    subtitle:SetText("Enable/disable each module. |cffffd100Shared|r = account-wide settings; uncheck for this character's own settings.")
+
+    -- Column header for the scope toggle.
+    local scopeHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    scopeHdr:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 300, -6)
+    scopeHdr:SetText("Shared")
+
+    local enableChecks, scopeChecks = {}, {}
+    local function RefreshChecks()
+        for key, cb in pairs(enableChecks) do cb:SetChecked(ns.IsModuleEnabled(key)) end
+        for key, cb in pairs(scopeChecks) do cb:SetChecked(ns.GetScope(key) == "account") end
+    end
 
     local anchor = subtitle
     for _, module in ipairs(ns.modules) do
         if module.key and module.title then
             local key = module.key
             local cb = ns.CreateCheck(panel, module.title, module.desc, ns.IsModuleEnabled(key))
-            cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
+            cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, (anchor == subtitle) and -14 or -8)
             cb:SetScript("OnClick", function(self)
-                ns.config.modules[key] = self:GetChecked() and true or false
+                ns.SetModuleEnabled(key, self:GetChecked() and true or false)
             end)
+            enableChecks[key] = cb
+
+            local sc = ns.CreateCheck(panel, "Shared",
+                "Checked: this module uses shared account-wide settings.\nUnchecked: this character uses its own settings for this module (seeded from the account settings).\nApplies after a reload.",
+                ns.GetScope(key) == "account")
+            sc:SetPoint("LEFT", cb, "LEFT", 300, 0)
+            sc:SetScript("OnClick", function(self)
+                ns.SetScope(key, self:GetChecked() and "account" or "character")
+                enableChecks[key]:SetChecked(ns.IsModuleEnabled(key))
+                ns.PromptReload()
+            end)
+            scopeChecks[key] = sc
+
             anchor = cb
         end
     end
 
+    -- Bulk scope buttons.
+    local allShared = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    allShared:SetSize(150, 22)
+    allShared:SetText("All shared")
+    allShared:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -14)
+    allShared:SetScript("OnClick", function()
+        for _, m in ipairs(ns.modules) do if m.key then ns.SetScope(m.key, "account") end end
+        RefreshChecks()
+        ns.PromptReload()
+    end)
+
+    local allChar = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    allChar:SetSize(150, 22)
+    allChar:SetText("All per-character")
+    allChar:SetPoint("LEFT", allShared, "RIGHT", 8, 0)
+    allChar:SetScript("OnClick", function()
+        for _, m in ipairs(ns.modules) do if m.key then ns.SetScope(m.key, "character") end end
+        RefreshChecks()
+        ns.PromptReload()
+    end)
+
     local sep = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    sep:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -22)
+    sep:SetPoint("TOPLEFT", allShared, "BOTTOMLEFT", 0, -22)
     sep:SetText("UI Profiles")
 
     local btn = CreateFrame("Button", "HKSuiteLoadProfilesButton", panel, "UIPanelButtonTemplate")

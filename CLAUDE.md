@@ -30,8 +30,10 @@ When creating a new module:
    })
    ```
 2. Declare defaults under that key: `ns.defaults.mymodule = { enabled_thing = true }`.
-3. In `M:OnInit()`, read `ns.config.mymodule`, register events, and **guard all
-   behavior** behind the module toggle so the Overview switch actually works:
+3. In `M:OnInit()`, read the config via **`ns.GetConfig("mymodule")`** (NOT
+   `ns.config.mymodule` directly — the resolver returns the account or
+   per-character table based on the module's scope). Register events, and
+   **guard all behavior** behind the module toggle so the Overview switch works:
    ```lua
    frame:SetScript("OnEvent", function(_, event, ...)
        if ns.IsModuleEnabled("mymodule") then handlers[event](...) end
@@ -48,6 +50,15 @@ When creating a new module:
 5. Add the file to `HKSuite.toc` (after `Overview.lua`).
 
 See `Modules/QuestAutomation.lua` as the reference implementation.
+
+## Settings scope (account vs per-character)
+Settings live in `HKSuiteDB` (account, `## SavedVariables`) or `HKSuiteCharDB`
+(per-character, `## SavedVariablesPerCharacter`). Each character chooses, per
+module, which to use via the "Shared" toggle on the Overview (default: account).
+Modules must read config through `ns.GetConfig(key)` and check
+`ns.IsModuleEnabled(key)` — both are scope-aware. Scope changes take effect after
+a reload (modules capture their config table once at load), so `ns.SetScope`
+callers should follow up with `ns.PromptReload()`.
 
 ## Rule: prototype new modules in Scratch.lua (avoid restarts)
 The client only scans for addons/files at launch, so **adding a new file to the

@@ -196,7 +196,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.addonbutton
+    cfg = ns.GetConfig("addonbutton")
     CreateWidgets()
     ApplyButton()
     BuildOptionsPanel()

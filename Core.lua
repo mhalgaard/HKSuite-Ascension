@@ -2,7 +2,7 @@ local ADDON, ns = ...
 
 -- Shared namespace for all modules in the suite.
 ns.name = "HKSuite"
-ns.version = "0.1.0"
+ns.version = "1.2.0"
 ns.modules = {}
 ns.defaults = {}   -- modules populate this at file-load time
 
@@ -13,23 +13,81 @@ function ns.Print(msg)
 end
 
 -- Register a module table. Recognised fields:
---   key    (string) unique id, also the SavedVariables sub-table name
---   title  (string) display name shown on the Overview page
---   desc   (string) one-line description (tooltip on the Overview)
---   OnInit (function) called once after SavedVariables are ready
--- A module with a key automatically gets an enable/disable toggle on the
--- Overview page and an entry in ns.config.modules.
+--   key            (string) unique id, also the SavedVariables sub-table name
+--   title          (string) display name shown on the Overview page
+--   desc           (string) one-line description (tooltip on the Overview)
+--   defaultEnabled (bool)   default enabled state (true unless set to false)
+--   OnInit         (func)   called once after SavedVariables are ready
+-- A module with a key automatically appears on the Overview with an
+-- enable/disable toggle and an account/per-character scope toggle.
 function ns.RegisterModule(module)
     table.insert(ns.modules, module)
     return module
 end
 
--- Whether a module is currently enabled (default true).
-function ns.IsModuleEnabled(key)
-    return ns.config.modules[key] ~= false
+-- ============================ Settings scope =================================
+-- Each module's settings live in either the account DB (shared by all
+-- characters) or the per-character DB. The scope choice is itself per-character,
+-- so each character independently opts a module into its own settings. New
+-- characters default every module to "account".
+
+local function CopyTable(src)
+    local t = {}
+    for k, v in pairs(src) do
+        if type(v) == "table" then t[k] = CopyTable(v) else t[k] = v end
+    end
+    return t
 end
 
--- Shared UI helper: a labelled checkbox with an optional tooltip.
+function ns.GetScope(key)
+    return (ns.charDB.scope and ns.charDB.scope[key]) or "account"
+end
+
+-- The active settings table for a module, per its current scope.
+function ns.GetConfig(key)
+    if ns.GetScope(key) == "character" then
+        ns.charDB[key] = ns.charDB[key] or {}
+        return ns.charDB[key]
+    end
+    return ns.accountDB[key]
+end
+
+-- Whether a module is currently enabled (default true), scope-aware.
+function ns.IsModuleEnabled(key)
+    if ns.GetScope(key) == "character" then
+        local v = ns.charDB.modules[key]
+        if v == nil then v = ns.accountDB.modules[key] end
+        return v ~= false
+    end
+    return ns.accountDB.modules[key] ~= false
+end
+
+function ns.SetModuleEnabled(key, val)
+    if ns.GetScope(key) == "character" then
+        ns.charDB.modules[key] = val
+    else
+        ns.accountDB.modules[key] = val
+    end
+end
+
+-- Switch a module's scope. Switching to per-character seeds the character
+-- settings from the current account settings. Takes effect after a reload
+-- (modules read their config table once at load).
+function ns.SetScope(key, scope)
+    if scope == "character" then
+        if not ns.charDB[key] then
+            ns.charDB[key] = CopyTable(ns.accountDB[key] or {})
+        end
+        if ns.charDB.modules[key] == nil then
+            ns.charDB.modules[key] = ns.accountDB.modules[key]
+        end
+        ns.charDB.scope[key] = "character"
+    else
+        ns.charDB.scope[key] = "account"
+    end
+end
+
+-- ============================== UI helper ====================================
 local checkCount = 0
 function ns.CreateCheck(parent, label, tooltip, checked)
     checkCount = checkCount + 1
@@ -46,6 +104,18 @@ function ns.CreateCheck(parent, label, tooltip, checked)
         cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
     return cb
+end
+
+-- Reload prompt shown after scope changes.
+StaticPopupDialogs["HKSUITE_RELOAD"] = {
+    text = "HKSuite: reload the UI to apply the settings scope change?",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function() ReloadUI() end,
+    timeout = 0, whileDead = true, hideOnEscape = true,
+}
+function ns.PromptReload()
+    StaticPopup_Show("HKSUITE_RELOAD")
 end
 
 -- Recursively fill `dst` with any values from `src` that are missing.
@@ -65,14 +135,29 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON then
         HKSuiteDB = HKSuiteDB or {}
-        ns.config = HKSuiteDB
-        CopyDefaults(ns.defaults, ns.config)
+        HKSuiteCharDB = HKSuiteCharDB or {}
+        ns.accountDB = HKSuiteDB
+        ns.charDB = HKSuiteCharDB
+        ns.config = HKSuiteDB    -- account-level defaults live here
 
-        -- Per-module enabled flags (default on).
-        ns.config.modules = ns.config.modules or {}
+        CopyDefaults(ns.defaults, ns.accountDB)
+
+        ns.accountDB.modules = ns.accountDB.modules or {}
+        ns.charDB.modules = ns.charDB.modules or {}
+        ns.charDB.scope = ns.charDB.scope or {}
+
+        -- Default enable flags (account).
         for _, module in ipairs(ns.modules) do
-            if module.key and ns.config.modules[module.key] == nil then
-                ns.config.modules[module.key] = (module.defaultEnabled ~= false)
+            if module.key and ns.accountDB.modules[module.key] == nil then
+                ns.accountDB.modules[module.key] = (module.defaultEnabled ~= false)
+            end
+        end
+
+        -- Make sure any existing per-character tables get newly-added defaults.
+        for _, module in ipairs(ns.modules) do
+            local key = module.key
+            if key and ns.charDB[key] and ns.defaults[key] then
+                CopyDefaults(ns.defaults[key], ns.charDB[key])
             end
         end
 

@@ -105,7 +105,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.system
+    cfg = ns.GetConfig("system")
     BuildOptionsPanel()
 
     -- Instant loot + bind-on-pickup confirmation.

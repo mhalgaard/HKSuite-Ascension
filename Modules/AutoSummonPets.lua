@@ -262,7 +262,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.pets
+    cfg = ns.GetConfig("pets")
     BuildOptionsPanel()
 
     local ev = CreateFrame("Frame")

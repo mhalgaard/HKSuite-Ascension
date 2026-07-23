@@ -74,7 +74,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.delete
+    cfg = ns.GetConfig("delete")
 
     -- StaticPopup_Show sets up and displays the dialog; hook runs right after,
     -- when the frame is shown and its edit box is ready.

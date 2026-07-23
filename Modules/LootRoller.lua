@@ -307,7 +307,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.lootroll
+    cfg = ns.GetConfig("lootroll")
     BuildOptionsPanel()
 
     local f = CreateFrame("Frame")

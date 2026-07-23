@@ -357,7 +357,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.social
+    cfg = ns.GetConfig("social")
     BuildOptionsPanel()
 
     if IsInGuild() then GuildRoster() end   -- request roster so guild checks work

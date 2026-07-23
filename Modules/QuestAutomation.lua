@@ -236,7 +236,7 @@ local function BuildOptionsPanel()
 end
 
 function M:OnInit()
-    cfg = ns.config.quest
+    cfg = ns.GetConfig("quest")
 
     -- Reward selection can only deliver if turn-in is on, so keep them in sync.
     if cfg.autoSelectReward then cfg.autoTurnIn = true end
