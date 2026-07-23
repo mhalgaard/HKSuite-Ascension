@@ -199,6 +199,238 @@ function ns.GrabVanityByName(name)
     ns.Print("Grabbing " .. (VANITY_ITEMS[id].name or name) .. ".")
 end
 
+-- Grab a specific vanity item by its collection ID (most reliable), if owned.
+function ns.GrabVanityById(id, label)
+    if not ns.IsModuleEnabled("vanity") then return end
+    if not (C_VanityCollection and C_VanityCollection.IsCollectionItemOwned and RequestDeliverVanityCollectionItem) then
+        ns.Print("Vanity collection API not available on this client.")
+        return
+    end
+    label = label or ("vanity " .. id)
+    if not C_VanityCollection.IsCollectionItemOwned(id) then
+        ns.Print(label .. " is not in your collection.")
+        return
+    end
+    RequestDeliverVanityCollectionItem(id)
+    ns.Print("Grabbing " .. label .. ".")
+end
+
+-- ---------------------------------------------------------------- bundle grab
+-- Grab a set of useful vanity items (owned only), one every 2s, with a progress
+-- dialog and a cancel button.
+local progressFrame
+local grabQueue, grabTicker, grabTotal, grabDone = {}, nil, 0, 0
+
+local function StopGrab()
+    if grabTicker then grabTicker:Cancel() grabTicker = nil end
+    grabQueue = {}
+end
+
+local function GrabStep()
+    local entry = table.remove(grabQueue, 1)
+    if not entry then StopGrab() return end
+    RequestDeliverVanityCollectionItem(entry.id)
+    grabDone = grabDone + 1
+    if progressFrame then
+        progressFrame.status:SetText(("Grabbing %d / %d:  %s"):format(grabDone, grabTotal, entry.name))
+    end
+    if #grabQueue == 0 then
+        StopGrab()
+        if progressFrame then progressFrame.status:SetText(("Done — grabbed %d item(s)."):format(grabDone)) end
+    end
+end
+
+local function EnsureProgressFrame()
+    if progressFrame then return progressFrame end
+    local f = CreateFrame("Frame", "HKSuiteVanityBundle", UIParent)
+    f:SetSize(390, 160)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 16,
+        insets = { left = 6, right = 6, top = 6, bottom = 6 },
+    })
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:SetScript("OnMouseDown", function(self) self:StartMoving() end)
+    f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
+
+    local title = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    title:SetPoint("TOP", 0, -14)
+    title:SetText("HKSuite — Grab Vanity Bundle")
+
+    f.status = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    f.status:SetPoint("TOP", 0, -38)
+    f.status:SetWidth(350); f.status:SetJustifyH("CENTER")
+
+    f.missing = f:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    f.missing:SetPoint("TOPLEFT", 18, -60)
+    f.missing:SetWidth(354); f.missing:SetJustifyH("LEFT")
+
+    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    cancel:SetSize(130, 24)
+    cancel:SetPoint("BOTTOM", 0, 14)
+    cancel:SetText("Cancel / Close")
+    cancel:SetScript("OnClick", function() StopGrab() f:Hide() end)
+
+    progressFrame = f
+    return f
+end
+
+local function FormatMissing(missing)
+    if #missing == 0 then return "|cff888888All target items owned.|r" end
+    local list, suffix = missing, ""
+    if #missing > 12 then
+        list = {}
+        for i = 1, 12 do list[i] = missing[i] end
+        suffix = (", +%d more"):format(#missing - 12)
+    end
+    return "|cff888888Not owned (" .. #missing .. "): " .. table.concat(list, ", ") .. suffix .. "|r"
+end
+
+local BUNDLE_NAMES = {
+    "Thermal Anvil",
+    "Gnomish Portable Post Tube",
+    "Portable Call Board (Outlaw)",
+    "Feather of Ancients: Azeroth",
+    "Raid Marker - Bundle",
+    "Mechanical Mystic Altar",
+}
+
+local function ResolveBundle()
+    local faction = UnitFactionGroup("player")
+    local names = {}
+    for _, n in ipairs(BUNDLE_NAMES) do names[#names + 1] = n end
+    if faction == "Horde" then
+        names[#names + 1] = "Portable Call Board (Horde)"
+        names[#names + 1] = "Scroll of Retreat: Orgrimmar"
+    elseif faction == "Alliance" then
+        names[#names + 1] = "Portable Call Board (Alliance)"
+        names[#names + 1] = "Scroll of Retreat: Alliance"
+    end
+
+    local idSet, toGrab, missing = {}, {}, {}
+    local function consider(id, name)
+        if idSet[id] then return end
+        idSet[id] = true
+        if C_VanityCollection.IsCollectionItemOwned(id) then
+            toGrab[#toGrab + 1] = { id = id, name = name }
+        else
+            missing[#missing + 1] = name
+        end
+    end
+
+    -- Match against the collection name AND the real item name (they can differ).
+    local function matches(v, want)
+        if v.name and (v.name == want or v.name:find(want, 1, true)) then return true end
+        if v.itemid then
+            local iname = GetItemInfo(v.itemid)
+            if iname and (iname == want or iname:find(want, 1, true)) then return true end
+        end
+        return false
+    end
+
+    for _, want in ipairs(names) do
+        local id, vname
+        for k, v in pairs(VANITY_ITEMS) do
+            if matches(v, want) then id, vname = k, (v.name or want) break end
+        end
+        if id then consider(id, vname) else missing[#missing + 1] = want .. " (?)" end
+    end
+
+    -- All "Altar" vanity items, excluding any "Stone of Retreat:" entries.
+    for k, v in pairs(VANITY_ITEMS) do
+        local n = v.name:lower()
+        if n:find("altar") and not n:find("stone of retreat") then
+            consider(k, v.name)
+        end
+    end
+
+    return toGrab, missing
+end
+
+function ns.GrabVanityBundle()
+    if not ns.IsModuleEnabled("vanity") then return end
+    if not apiReady() then ns.Print("Vanity collection API not available on this client.") return end
+    StopGrab()
+
+    local toGrab, missing = ResolveBundle()
+    grabQueue, grabTotal, grabDone = toGrab, #toGrab, 0
+
+    local f = EnsureProgressFrame()
+    f:Show()
+    f.missing:SetText(FormatMissing(missing))
+    if grabTotal == 0 then
+        f.status:SetText("Nothing owned to grab.")
+        return
+    end
+    f.status:SetText(("Grabbing 0 / %d..."):format(grabTotal))
+    if C_Timer and C_Timer.NewTicker then
+        grabTicker = C_Timer.NewTicker(2, GrabStep)   -- 2s between deliveries
+    else
+        while #grabQueue > 0 do GrabStep() end
+    end
+end
+
+-- ------------------------------------------------- delete warchest duplicates
+-- The consumable items the Fel Enchanted Warchest grants; once collected as
+-- vanity, the physical copies are just clutter. Matched by name (never bags).
+local DELETE_NAMES = {
+    "Fel-Infused Tabard of Ascension",
+    "Felflame Talbuk",
+    "Fel-Infused Gateway",
+    "Pit Lord's Eye",
+}
+local DELETE_SET = {}
+for _, n in ipairs(DELETE_NAMES) do DELETE_SET[n:lower()] = true end
+
+local function bagItemName(link)
+    return link and link:match("|h%[(.+)%]|h")
+end
+
+local function CountFelItems()
+    local c = 0
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots(bag) do
+            local n = bagItemName(GetContainerItemLink(bag, slot))
+            if n and DELETE_SET[n:lower()] then c = c + 1 end
+        end
+    end
+    return c
+end
+
+function ns.DoDeleteFelItems()
+    local c = 0
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots(bag) do
+            local n = bagItemName(GetContainerItemLink(bag, slot))
+            if n and DELETE_SET[n:lower()] then
+                PickupContainerItem(bag, slot)
+                DeleteCursorItem()
+                c = c + 1
+            end
+        end
+    end
+    ns.Print("Deleted " .. c .. " Fel Warchest item(s).")
+end
+
+StaticPopupDialogs["HKSUITE_DELETE_FEL"] = {
+    text = "Delete %d Fel Enchanted Warchest item(s) from your bags?\nThis cannot be undone.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function() ns.DoDeleteFelItems() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
+}
+
+function ns.DeleteFelItems()
+    if not ns.IsModuleEnabled("vanity") then return end
+    local c = CountFelItems()
+    if c == 0 then ns.Print("No Fel Warchest items found in your bags.") return end
+    StaticPopup_Show("HKSUITE_DELETE_FEL", c)
+end
+
 local function BuildOptionsPanel()
     local panel = CreateFrame("Frame")
     panel.name = "Auto-Grab Vanity"
@@ -223,7 +455,29 @@ local function BuildOptionsPanel()
     felBtn:SetSize(220, 24)
     felBtn:SetText("Grab Fel Enchanted Warchest")
     felBtn:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -10)
-    felBtn:SetScript("OnClick", function() ns.GrabVanityByName("Fel Enchanted Warchest") end)
+    felBtn:SetScript("OnClick", function() ns.GrabVanityById(657112, "Fel Enchanted Warchest") end)
+
+    local bundleBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    bundleBtn:SetSize(220, 24)
+    bundleBtn:SetText("Grab utility bundle")
+    bundleBtn:SetPoint("TOPLEFT", felBtn, "BOTTOMLEFT", 0, -10)
+    bundleBtn:SetScript("OnClick", ns.GrabVanityBundle)
+
+    local bundleHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    bundleHint:SetPoint("TOPLEFT", bundleBtn, "BOTTOMLEFT", 2, -6)
+    bundleHint:SetWidth(360); bundleHint:SetJustifyH("LEFT")
+    bundleHint:SetText("Anvil, Post Tube, Call Boards, Retreat scrolls, Feather, all Altars, Raid Markers. Owned only, 2s each, with a progress dialog.")
+
+    local delBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    delBtn:SetSize(220, 24)
+    delBtn:SetText("Delete Fel Warchest items")
+    delBtn:SetPoint("TOPLEFT", bundleHint, "BOTTOMLEFT", -2, -16)
+    delBtn:SetScript("OnClick", ns.DeleteFelItems)
+
+    local delHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    delHint:SetPoint("TOPLEFT", delBtn, "BOTTOMLEFT", 2, -6)
+    delHint:SetWidth(360); delHint:SetJustifyH("LEFT")
+    delHint:SetText("Deletes the Warchest's tabard, mount, gateway and companion duplicates from your bags (with confirmation). Bags are never touched.")
 
     InterfaceOptions_AddCategory(panel)
 end
