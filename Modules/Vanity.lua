@@ -368,9 +368,9 @@ function ns.DeleteFelItems()
 end
 
 -- ------------------------------------------------- delete vanity from bags
--- Vanity items are identified by scanning the tooltip for Ascension's
--- "You own this vanity item" / "collected this appearance" lines — more reliable
--- than mapping VANITY_ITEMS item IDs to bag items.
+-- A bag item is a vanity item if its tooltip carries Ascension's
+-- "You own this vanity item" line. (We deliberately do NOT match
+-- "collected this appearance" — that's on every transmog-unlocked gear piece.)
 local scanTip = CreateFrame("GameTooltip", "HKSuiteVanityScanTip", nil, "GameTooltipTemplate")
 
 local function isOwnedVanity(bag, slot)
@@ -380,11 +380,8 @@ local function isOwnedVanity(bag, slot)
     for i = 1, scanTip:NumLines() do
         local fs = _G["HKSuiteVanityScanTipTextLeft" .. i]
         local text = fs and fs:GetText()
-        if text then
-            local t = text:lower()
-            if t:find("own this vanity item", 1, true) or t:find("collected this appearance", 1, true) then
-                return true
-            end
+        if text and text:lower():find("own this vanity item", 1, true) then
+            return true
         end
     end
     return false
