@@ -442,6 +442,9 @@ end
 -- "collected this appearance" — that's on every transmog-unlocked gear piece.)
 local scanTip = CreateFrame("GameTooltip", "HKSuiteVanityScanTip", nil, "GameTooltipTemplate")
 
+-- Owned vanity items that may be deleted even when NOT soulbound (by name).
+local NO_BIND_REQUIRED = { ["realm bank"] = true }
+
 local function isOwnedVanity(bag, slot)
     scanTip:SetOwner(UIParent, "ANCHOR_NONE")
     scanTip:ClearLines()
@@ -457,7 +460,12 @@ local function isOwnedVanity(bag, slot)
             if t:find("soulbound", 1, true) then bound = true end
         end
     end
-    return owned and bound   -- only delete owned vanity that is soulbound
+    if not owned then return false end
+    if bound then return true end
+    -- Not soulbound: only delete if it's on the no-bind-required whitelist.
+    local link = GetContainerItemLink(bag, slot)
+    local name = link and link:match("|h%[(.+)%]|h")
+    return name ~= nil and NO_BIND_REQUIRED[name:lower()] == true
 end
 
 -- All owned vanity items in bags.
