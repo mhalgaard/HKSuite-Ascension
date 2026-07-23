@@ -255,26 +255,46 @@ local BUNDLE_FACTION = {
     },
 }
 
+-- Set of item names currently in the player's bags (lowercased).
+local function bagNameSet()
+    local set = {}
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots(bag) do
+            local link = GetContainerItemLink(bag, slot)
+            local name = link and link:match("|h%[(.+)%]|h")
+            if name then set[name:lower()] = true end
+        end
+    end
+    return set
+end
+
 local function ResolveBundle()
     local list = {}
     for _, e in ipairs(BUNDLE) do list[#list + 1] = e end
     local fac = BUNDLE_FACTION[UnitFactionGroup("player")]
     if fac then for _, e in ipairs(fac) do list[#list + 1] = e end end
 
-    local seenId, missSeen, toGrab, missing = {}, {}, {}, {}
+    local inBags = bagNameSet()
+    local seenId, missSeen, toGrab, missing, already = {}, {}, {}, {}, 0
     local groupChosen, groupSeen, groupName = {}, {}, {}
     for _, e in ipairs(list) do
         if not seenId[e.id] then
             seenId[e.id] = true
             local owned = C_VanityCollection.IsCollectionItemOwned(e.id)
+            local haveIt = inBags[e.name:lower()] == true
             if e.group then
-                -- Grouped entries are alternatives: grab only the first owned one.
+                -- Grouped entries are alternatives: keep only the first owned one.
                 groupSeen[e.group] = true
                 groupName[e.group] = e.name
-                if owned and not groupChosen[e.group] then
+                if haveIt then
+                    if not groupChosen[e.group] then already = already + 1 end
+                    groupChosen[e.group] = true              -- already have one; don't grab
+                elseif owned and not groupChosen[e.group] then
                     groupChosen[e.group] = true
                     toGrab[#toGrab + 1] = { id = e.id, name = e.name }
                 end
+            elseif haveIt then
+                already = already + 1                         -- already in bags; skip
             elseif owned then
                 toGrab[#toGrab + 1] = { id = e.id, name = e.name }
             elseif not missSeen[e.name] then
@@ -287,7 +307,7 @@ local function ResolveBundle()
     for g in pairs(groupSeen) do
         if not groupChosen[g] then missing[#missing + 1] = groupName[g] end
     end
-    return toGrab, missing
+    return toGrab, missing, already
 end
 
 -- Deliver one at a time (the server only honours one delivery request at a time),
@@ -358,15 +378,23 @@ function ns.GrabVanityBundle()
         ns.Print("Vanity collection API not available on this client.")
         return
     end
-    local toGrab, missing = ResolveBundle()
-    if #toGrab == 0 then ns.Print("No utility vanity items to grab.") return end
+    local toGrab, missing, already = ResolveBundle()
+    if #toGrab == 0 then
+        if already > 0 then
+            ns.Print("Utility bundle items are already in your bags.")
+        else
+            ns.Print("No utility vanity items to grab.")
+        end
+        return
+    end
 
     if bundleTicker then bundleTicker:Cancel() bundleTicker = nil end
     bundleQueue, bundleTotal, bundleDone = toGrab, #toGrab, 0
 
     local f = EnsureBundleFrame()
     f:Show()
-    f.status:SetText(("Grabbing %d item(s)…%s"):format(bundleTotal,
+    f.status:SetText(("Grabbing %d item(s)…%s%s"):format(bundleTotal,
+        already > 0 and ("\n(" .. already .. " already in bags)") or "",
         #missing > 0 and ("\n(" .. #missing .. " not owned)") or ""))
 
     bundleStep()   -- first immediately, rest on a short interval
@@ -442,14 +470,20 @@ end
 -- "collected this appearance" — that's on every transmog-unlocked gear piece.)
 local scanTip = CreateFrame("GameTooltip", "HKSuiteVanityScanTip", nil, "GameTooltipTemplate")
 
--- Owned vanity items that may be deleted even when NOT soulbound (by name).
-local NO_BIND_REQUIRED = { ["realm bank"] = true }
+-- Bind states that mean the item is already tied to you (safe to delete).
+local BOUND_STATES = {
+    "soulbound", "realm bound", "realmbound", "realm-bound",
+    "account bound", "accountbound", "bound to account",
+}
 
+-- Delete an owned vanity item only when it is already bound (soulbound or
+-- realm/account bound) and NOT still Bind-on-Equip / Bind-on-Use (which stay
+-- tradeable and may have value).
 local function isOwnedVanity(bag, slot)
     scanTip:SetOwner(UIParent, "ANCHOR_NONE")
     scanTip:ClearLines()
     scanTip:SetBagItem(bag, slot)
-    local owned, bound = false, false
+    local owned, bound, tradeable = false, false, false
     for i = 1, scanTip:NumLines() do
         local fs = _G["HKSuiteVanityScanTipTextLeft" .. i]
         local text = fs and fs:GetText()
@@ -457,15 +491,15 @@ local function isOwnedVanity(bag, slot)
             local t = text:lower()
             -- The full "you own" prefix excludes the negatives ("You don't own…").
             if t:find("you own this vanity item", 1, true) then owned = true end
-            if t:find("soulbound", 1, true) then bound = true end
+            for _, phrase in ipairs(BOUND_STATES) do
+                if t:find(phrase, 1, true) then bound = true break end
+            end
+            if t:find("binds when equipped", 1, true) or t:find("binds when used", 1, true) then
+                tradeable = true
+            end
         end
     end
-    if not owned then return false end
-    if bound then return true end
-    -- Not soulbound: only delete if it's on the no-bind-required whitelist.
-    local link = GetContainerItemLink(bag, slot)
-    local name = link and link:match("|h%[(.+)%]|h")
-    return name ~= nil and NO_BIND_REQUIRED[name:lower()] == true
+    return owned and bound and not tradeable
 end
 
 -- All owned vanity items in bags.
