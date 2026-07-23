@@ -143,12 +143,15 @@ local function BuildOptionsPanel()
     note:SetPoint("LEFT", clearBtn, "RIGHT", 10, 0)
     note:SetText("Prestige and Mentorship quests are always kept.")
 
-    local anchor = clearBtn
+    -- Fixed columns + running y so top-level checks align and sub-options indent
+    -- consistently (no drifting staircase).
+    local BASE_X = 16
+    local yPos = -74
     local function AddCheck(label, tip, key, indent)
         local cb = ns.CreateCheck(panel, label, tip, cfg[key])
-        cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", indent and 20 or 0, indent and -2 or -6)
+        cb:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X + (indent and 22 or 0), yPos)
         cb:SetScript("OnClick", function(self) cfg[key] = self:GetChecked() and true or false end)
-        anchor = cb
+        yPos = yPos - (indent and 22 or 26)
         return cb
     end
 
@@ -163,7 +166,7 @@ local function BuildOptionsPanel()
 
     -- Whitelist editor.
     local wlLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    wlLabel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -16)
+    wlLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X, yPos - 12)
     wlLabel:SetText("Always-keep whitelist (one quest title per line):")
 
     local wlScroll = CreateFrame("ScrollFrame", "HKSuiteCQScroll", panel, "UIPanelScrollFrameTemplate")

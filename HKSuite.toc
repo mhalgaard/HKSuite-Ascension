@@ -2,7 +2,7 @@
 ## Title: HKSuite
 ## Notes: A suite of quality-of-life utilities for Project Ascension
 ## Author: mhalgaard
-## Version: 1.15.0
+## Version: 1.15.1
 ## SavedVariables: HKSuiteDB
 ## SavedVariablesPerCharacter: HKSuiteCharDB
 
