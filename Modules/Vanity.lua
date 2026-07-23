@@ -174,6 +174,31 @@ function ns.GrabVanity()
     end
 end
 
+-- Grab a specific vanity item by name (e.g. a repeatable warchest), if owned.
+function ns.GrabVanityByName(name)
+    if not ns.IsModuleEnabled("vanity") then return end
+    if not apiReady() then
+        ns.Print("Vanity collection API not available on this client.")
+        return
+    end
+    local id
+    for k, v in pairs(VANITY_ITEMS) do
+        if v.name == name then id = k break end
+    end
+    if not id then                                   -- fallback: substring match
+        for k, v in pairs(VANITY_ITEMS) do
+            if v.name:find(name, 1, true) then id = k break end
+        end
+    end
+    if not id then ns.Print(name .. " not found in the vanity list.") return end
+    if not C_VanityCollection.IsCollectionItemOwned(id) then
+        ns.Print(name .. " is not in your collection.")
+        return
+    end
+    RequestDeliverVanityCollectionItem(id)
+    ns.Print("Grabbing " .. (VANITY_ITEMS[id].name or name) .. ".")
+end
+
 local function BuildOptionsPanel()
     local panel = CreateFrame("Frame")
     panel.name = "Auto-Grab Vanity"
@@ -193,6 +218,12 @@ local function BuildOptionsPanel()
     btn:SetText("Grab now")
     btn:SetPoint("TOPLEFT", gl, "BOTTOMLEFT", 0, -14)
     btn:SetScript("OnClick", ns.GrabVanity)
+
+    local felBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    felBtn:SetSize(220, 24)
+    felBtn:SetText("Grab Fel Enchanted Warchest")
+    felBtn:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -10)
+    felBtn:SetScript("OnClick", function() ns.GrabVanityByName("Fel Enchanted Warchest") end)
 
     InterfaceOptions_AddCategory(panel)
 end
