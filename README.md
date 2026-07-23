@@ -34,6 +34,8 @@ apply after a reload.
 | Auto turn in quests | Off | Hands in completed quests. Waits for you on reward-choice quests unless the sub-option below is on. |
 | └ Auto-select most valuable reward | Off | On reward-choice quests, picks the highest vendor-value reward. Enabling it also enables Auto turn in. |
 | Auto-skip single gossip option | Off | When an NPC has one gossip option and no quests to handle, selects it to skip the talk menu. |
+| Don't auto-accept daily quests | Off | Skips auto-accepting quests flagged as daily. |
+| Auto-accept callboard / command board quests | Off | Callboard/command board quests are not auto-accepted unless this is on. |
 
 A **bypass key** (default: Shift) pauses all quest automation while held.
 

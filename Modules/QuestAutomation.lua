@@ -12,10 +12,22 @@ ns.defaults.quest = {
     autoTurnIn       = false,  -- hand in completed quests automatically
     autoSelectReward = false,  -- pick the highest-vendor-value reward, then hand in
     autoSkipGossip   = false,  -- auto-select a lone gossip option to skip the talk menu
+    skipDailies      = false,  -- don't auto-accept daily quests
+    autoAcceptCallboard = false, -- auto-accept callboard / command board quests
     bypassModifier   = "SHIFT", -- hold this to temporarily disable: SHIFT / CTRL / ALT / NONE
 }
 
 local cfg  -- filled in OnInit
+
+-- The callboard / command board is a specific quest giver we treat separately.
+local CALLBOARD_NAMES = { "callboard", "command board" }
+local function IsCallboard()
+    local name = (UnitName("npc") or UnitName("target") or ""):lower()
+    for _, n in ipairs(CALLBOARD_NAMES) do
+        if name:find(n, 1, true) then return true end
+    end
+    return false
+end
 
 -- True while the player holds the configured bypass key, so they can
 -- interact with quest givers manually without automation kicking in.
@@ -62,6 +74,8 @@ local lastQuestTitle, lastQuestTime = nil, 0
 
 function handlers.QUEST_DETAIL()
     if not cfg.autoAccept or BypassHeld() then return end
+    if cfg.skipDailies and QuestIsDaily and QuestIsDaily() then return end
+    if IsCallboard() and not cfg.autoAcceptCallboard then return end
     local title = GetTitleText()
     local now = GetTime()
     if title and title == lastQuestTitle and (now - lastQuestTime) < 1.5 then
@@ -104,7 +118,7 @@ function handlers.QUEST_GREETING()
             SelectActiveQuest(i)
         end
     end
-    if cfg.autoAccept then
+    if cfg.autoAccept and not (IsCallboard() and not cfg.autoAcceptCallboard) then
         for i = 1, GetNumAvailableQuests() do
             SelectAvailableQuest(i)
         end
@@ -113,7 +127,7 @@ end
 
 function handlers.GOSSIP_SHOW()
     if BypassHeld() then return end
-    if cfg.autoAccept then
+    if cfg.autoAccept and not (IsCallboard() and not cfg.autoAcceptCallboard) then
         for i = 1, GetNumGossipAvailableQuests() do
             SelectGossipAvailableQuest(i)
         end
@@ -209,8 +223,24 @@ local function BuildOptionsPanel()
         cfg.autoSkipGossip = self:GetChecked() and true or false
     end)
 
+    local skipDaily = ns.CreateCheck(panel, "Don't auto-accept daily quests",
+        "Skips auto-accepting quests flagged as daily. You can still accept them manually.",
+        cfg.skipDailies)
+    skipDaily:SetPoint("TOPLEFT", skipGossip, "BOTTOMLEFT", 0, -8)
+    skipDaily:SetScript("OnClick", function(self)
+        cfg.skipDailies = self:GetChecked() and true or false
+    end)
+
+    local callboard = ns.CreateCheck(panel, "Auto-accept callboard / command board quests",
+        "By default, quests from the callboard / command board are NOT auto-accepted. Enable this to auto-accept them too.",
+        cfg.autoAcceptCallboard)
+    callboard:SetPoint("TOPLEFT", skipDaily, "BOTTOMLEFT", 0, -8)
+    callboard:SetScript("OnClick", function(self)
+        cfg.autoAcceptCallboard = self:GetChecked() and true or false
+    end)
+
     local bypassLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    bypassLabel:SetPoint("TOPLEFT", skipGossip, "BOTTOMLEFT", 0, -18)
+    bypassLabel:SetPoint("TOPLEFT", callboard, "BOTTOMLEFT", 0, -18)
     bypassLabel:SetText("Hold key to pause automation:")
 
     local dropdown = CreateFrame("Frame", "HKSuiteBypassDropdown", panel, "UIDropDownMenuTemplate")
