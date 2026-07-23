@@ -290,70 +290,70 @@ local function FormatMissing(missing)
     return "|cff888888Not owned (" .. #missing .. "): " .. table.concat(list, ", ") .. suffix .. "|r"
 end
 
-local BUNDLE_NAMES = {
-    "Thermal Anvil",
-    "Gnomish Portable Post Tube",
-    "Portable Call Board (Outlaw)",
-    "Feather of Ancients: Azeroth",
-    "Raid Marker - Bundle",
-    "Mechanical Mystic Altar",
+-- Fixed vanity IDs. The collection's internal names don't match the item names,
+-- so we grab by ID. Feather has two possible IDs; only one exists per collection.
+local BUNDLE = {
+    { id = 1777028, name = "Thermal Anvil" },
+    { id = 1903512, name = "Gnomish Portable Post Tube" },
+    { id = 1913517, name = "Portable Call Board (Outlaw)" },
+    { id = 499428,  name = "Raid Marker - Bundle" },
+    { id = 977025,  name = "Feather of Ancients: Azeroth" },
+    { id = 134989,  name = "Feather of Ancients: Azeroth" },
+    { id = 2903513, name = "Mechanical Mystic Altar" },
+    { id = 203955,  name = "Altar of Ancient Kings" },
+    { id = 8210202, name = "Altar of the Black Harvest" },
+    { id = 8210199, name = "Altar of the Conclave" },
+    { id = 8210195, name = "Altar of the Dreamweavers" },
+    { id = 8210201, name = "Altar of the Maelstrom" },
+    { id = 8210198, name = "Altar of the Silver Hand" },
+    { id = 8210250, name = "Altar of the Tirisgarde" },
+    { id = 203954,  name = "Altar of the Tirisgarde" },
+    { id = 8210200, name = "Altar of the Uncrowned" },
+    { id = 8210196, name = "Altar of the Unseen Path" },
+    { id = 8210192, name = "Build Master's Mystic Enchanting Altar" },
+    { id = 8210197, name = "Destined Mystic Enchanting Altar" },
+    { id = 406,     name = "Felforged Enchanting Altar" },
+    { id = 1903513, name = "Mystic Enchanting Altar" },
+    { id = 503515,  name = "Scribe's Mystic Enchanting Altar" },
+}
+local BUNDLE_FACTION = {
+    Alliance = {
+        { id = 1913515, name = "Portable Call Board (Alliance)" },
+        { id = 1175626, name = "Scroll of Retreat: Stormwind" },
+    },
+    Horde = {
+        { id = 1913516, name = "Portable Call Board (Horde)" },
+        { id = 1175627, name = "Scroll of Retreat: Orgrimmar" },
+    },
 }
 
 local function ResolveBundle()
-    local faction = UnitFactionGroup("player")
-    local names = {}
-    for _, n in ipairs(BUNDLE_NAMES) do names[#names + 1] = n end
-    if faction == "Horde" then
-        names[#names + 1] = "Portable Call Board (Horde)"
-        names[#names + 1] = "Scroll of Retreat: Orgrimmar"
-    elseif faction == "Alliance" then
-        names[#names + 1] = "Portable Call Board (Alliance)"
-        names[#names + 1] = "Scroll of Retreat: Alliance"
-    end
+    local list = {}
+    for _, e in ipairs(BUNDLE) do list[#list + 1] = e end
+    local fac = BUNDLE_FACTION[UnitFactionGroup("player")]
+    if fac then for _, e in ipairs(fac) do list[#list + 1] = e end end
 
-    local idSet, toGrab, missing = {}, {}, {}
-    local function consider(id, name)
-        if idSet[id] then return end
-        idSet[id] = true
-        if C_VanityCollection.IsCollectionItemOwned(id) then
-            toGrab[#toGrab + 1] = { id = id, name = name }
-        else
-            missing[#missing + 1] = name
+    local seenId, missSeen, toGrab, missing = {}, {}, {}, {}
+    for _, e in ipairs(list) do
+        if not seenId[e.id] then
+            seenId[e.id] = true
+            if C_VanityCollection.IsCollectionItemOwned(e.id) then
+                toGrab[#toGrab + 1] = { id = e.id, name = e.name }
+            elseif not missSeen[e.name] then
+                missSeen[e.name] = true
+                missing[#missing + 1] = e.name
+            end
         end
     end
-
-    -- Match against the collection name AND the real item name (they can differ).
-    local function matches(v, want)
-        if v.name and (v.name == want or v.name:find(want, 1, true)) then return true end
-        if v.itemid then
-            local iname = GetItemInfo(v.itemid)
-            if iname and (iname == want or iname:find(want, 1, true)) then return true end
-        end
-        return false
-    end
-
-    for _, want in ipairs(names) do
-        local id, vname
-        for k, v in pairs(VANITY_ITEMS) do
-            if matches(v, want) then id, vname = k, (v.name or want) break end
-        end
-        if id then consider(id, vname) else missing[#missing + 1] = want .. " (?)" end
-    end
-
-    -- All "Altar" vanity items, excluding any "Stone of Retreat:" entries.
-    for k, v in pairs(VANITY_ITEMS) do
-        local n = v.name:lower()
-        if n:find("altar") and not n:find("stone of retreat") then
-            consider(k, v.name)
-        end
-    end
-
     return toGrab, missing
 end
 
 function ns.GrabVanityBundle()
     if not ns.IsModuleEnabled("vanity") then return end
-    if not apiReady() then ns.Print("Vanity collection API not available on this client.") return end
+    if not (C_VanityCollection and C_VanityCollection.IsCollectionItemOwned and RequestDeliverVanityCollectionItem) then
+        ns.Print("Vanity collection API not available on this client.")
+        return
+    end
     StopGrab()
 
     local toGrab, missing = ResolveBundle()
@@ -480,6 +480,34 @@ local function BuildOptionsPanel()
     delHint:SetText("Deletes the Warchest's tabard, mount, gateway and companion duplicates from your bags (with confirmation). Bags are never touched.")
 
     InterfaceOptions_AddCategory(panel)
+end
+
+-- Diagnostic: inspect VANITY_ITEMS so we can resolve real names/IDs.
+--   /hkvanity            -> entry count + field names
+--   /hkvanity thermal    -> entries whose name/item-name contains "thermal"
+SLASH_HKVANITY1 = "/hkvanity"
+SlashCmdList["HKVANITY"] = function(msg)
+    if not VANITY_ITEMS then ns.Print("VANITY_ITEMS is nil (not loaded).") return end
+    local search = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    local count, shown, sampled = 0, 0, false
+    for k, v in pairs(VANITY_ITEMS) do
+        count = count + 1
+        if not sampled and type(v) == "table" then
+            local fields = {}
+            for fk in pairs(v) do fields[#fields + 1] = tostring(fk) end
+            ns.Print("entry fields: " .. table.concat(fields, ", "))
+            sampled = true
+        end
+        if search ~= "" and shown < 20 and type(v) == "table" then
+            local nm = tostring(v.name or "")
+            local iname = v.itemid and GetItemInfo(v.itemid) or nil
+            if nm:lower():find(search, 1, true) or (iname and iname:lower():find(search, 1, true)) then
+                ns.Print(k .. " | name='" .. nm .. "'" .. (iname and (" item='" .. iname .. "'") or ""))
+                shown = shown + 1
+            end
+        end
+    end
+    ns.Print(("Total VANITY_ITEMS: %d%s"):format(count, search ~= "" and (", matches: " .. shown) or ""))
 end
 
 function M:OnInit()
