@@ -81,6 +81,12 @@ A movable square **HK** button near the minimap consolidates other addons'
 minimap buttons into one flyout. Click to open the menu, **Shift+click** for
 HKSuite options, **CTRL+drag** to move it.
 
+### Auto-Grab Vanity
+Automatically delivers unlearned vanity-collection spells you already own — on
+login and via a "Grab now" button. Handles Manastorm consumables, ranked
+upgrades, and skips bundles that would hand over an unusable item. (Ported from
+XanAscTweaks.)
+
 ## Releases
 Pushing a `vX.Y.Z` tag triggers a GitHub Action that packages the addon and
 publishes a Release with a ready-to-extract zip. See `.github/workflows/release.yml`.
