@@ -87,6 +87,15 @@ login and via a "Grab now" button. Handles Manastorm consumables, ranked
 upgrades, and skips bundles that would hand over an unusable item. (Ported from
 XanAscTweaks.)
 
+### Chat Filters  *(all filters off by default)*
+Suppress Ascension spam. Grouped with an **All on / All off** toggle:
+- **Rest areas:** hide /say and /yell while in a city.
+- **System broadcasts:** trials/nightmares, mystic altars, autobroadcasts, travel guides, keeper's scrolls, motherlodes, criminal intent, hardcore, posture check, faction-leader spawns, and world-boss spawn alerts.
+- **Channel spam:** `bau`, `dp` (not `dps`), `twitch`, `discord.gg` in public channels.
+- **Default chat tab:** remove the Newcomers / Ascension / World channels.
+
+(Ported from XanAscTweaks — disable that addon's overlapping options to avoid double behavior.)
+
 ## Releases
 Pushing a `vX.Y.Z` tag triggers a GitHub Action that packages the addon and
 publishes a Release with a ready-to-extract zip. See `.github/workflows/release.yml`.

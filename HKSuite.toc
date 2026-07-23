@@ -2,7 +2,7 @@
 ## Title: HKSuite
 ## Notes: A suite of quality-of-life utilities for Project Ascension
 ## Author: mhalgaard
-## Version: 1.4.0
+## Version: 1.5.0
 ## SavedVariables: HKSuiteDB
 ## SavedVariablesPerCharacter: HKSuiteCharDB
 
@@ -16,4 +16,5 @@ Modules\LootRoller.lua
 Modules\AutoSummonPets.lua
 Modules\AddonButton.lua
 Modules\Vanity.lua
+Modules\ChatFilters.lua
 Modules\Scratch.lua
