@@ -41,8 +41,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Publish as a pre-release (alpha). Promote to Latest once confirmed:
+          #   gh release edit <tag> --prerelease=false --latest
           gh release create "${GITHUB_REF_NAME}" \
             "dist/HKSuite-${GITHUB_REF_NAME}.zip" \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "HKSuite ${GITHUB_REF_NAME}" \
+            --title "HKSuite ${GITHUB_REF_NAME} (alpha)" \
+            --prerelease \
             --generate-notes

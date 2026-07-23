@@ -86,6 +86,17 @@ Default expectation when telling the user how to test:
 - Edited an existing file (incl. Scratch.lua) → `/reload`.
 - Added a new file to the toc / new addon → restart (or relog, then restart).
 
+## Rule: releases start as alpha, promote when confirmed
+Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which publishes the
+release as a **pre-release** (alpha) titled `HKSuite vX.Y.Z (alpha)`. It stays
+alpha until the user confirms it works in-game, then promote it to Latest:
+
+```
+"C:\Program Files\GitHub CLI\gh.exe" release edit vX.Y.Z --prerelease=false --latest
+```
+
+Don't mark a release Latest until the user has confirmed that version.
+
 ## Rule: deploy to the game after every change
 Whenever addon files change, copy the whole `HKSuite` folder into the live client
 AddOns directory so it can be tested in-game:
