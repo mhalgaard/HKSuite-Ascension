@@ -216,80 +216,6 @@ function ns.GrabVanityById(id, label)
 end
 
 -- ---------------------------------------------------------------- bundle grab
--- Grab a set of useful vanity items (owned only), one every 2s, with a progress
--- dialog and a cancel button.
-local progressFrame
-local grabQueue, grabTicker, grabTotal, grabDone = {}, nil, 0, 0
-
-local function StopGrab()
-    if grabTicker then grabTicker:Cancel() grabTicker = nil end
-    grabQueue = {}
-end
-
-local function GrabStep()
-    local entry = table.remove(grabQueue, 1)
-    if not entry then StopGrab() return end
-    RequestDeliverVanityCollectionItem(entry.id)
-    grabDone = grabDone + 1
-    if progressFrame then
-        progressFrame.status:SetText(("Grabbing %d / %d:  %s"):format(grabDone, grabTotal, entry.name))
-    end
-    if #grabQueue == 0 then
-        StopGrab()
-        if progressFrame then progressFrame.status:SetText(("Done — grabbed %d item(s)."):format(grabDone)) end
-    end
-end
-
-local function EnsureProgressFrame()
-    if progressFrame then return progressFrame end
-    local f = CreateFrame("Frame", "HKSuiteVanityBundle", UIParent)
-    f:SetSize(390, 160)
-    f:SetPoint("CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 16,
-        insets = { left = 6, right = 6, top = 6, bottom = 6 },
-    })
-    f:EnableMouse(true)
-    f:SetMovable(true)
-    f:SetScript("OnMouseDown", function(self) self:StartMoving() end)
-    f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
-
-    local title = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    title:SetPoint("TOP", 0, -14)
-    title:SetText("HKSuite — Grab Vanity Bundle")
-
-    f.status = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    f.status:SetPoint("TOP", 0, -38)
-    f.status:SetWidth(350); f.status:SetJustifyH("CENTER")
-
-    f.missing = f:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    f.missing:SetPoint("TOPLEFT", 18, -60)
-    f.missing:SetWidth(354); f.missing:SetJustifyH("LEFT")
-
-    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancel:SetSize(130, 24)
-    cancel:SetPoint("BOTTOM", 0, 14)
-    cancel:SetText("Cancel / Close")
-    cancel:SetScript("OnClick", function() StopGrab() f:Hide() end)
-
-    progressFrame = f
-    return f
-end
-
-local function FormatMissing(missing)
-    if #missing == 0 then return "|cff888888All target items owned.|r" end
-    local list, suffix = missing, ""
-    if #missing > 12 then
-        list = {}
-        for i = 1, 12 do list[i] = missing[i] end
-        suffix = (", +%d more"):format(#missing - 12)
-    end
-    return "|cff888888Not owned (" .. #missing .. "): " .. table.concat(list, ", ") .. suffix .. "|r"
-end
-
 -- Fixed vanity IDs. The collection's internal names don't match the item names,
 -- so we grab by ID. Feather has two possible IDs; only one exists per collection.
 local BUNDLE = {
@@ -354,24 +280,13 @@ function ns.GrabVanityBundle()
         ns.Print("Vanity collection API not available on this client.")
         return
     end
-    StopGrab()
-
     local toGrab, missing = ResolveBundle()
-    grabQueue, grabTotal, grabDone = toGrab, #toGrab, 0
-
-    local f = EnsureProgressFrame()
-    f:Show()
-    f.missing:SetText(FormatMissing(missing))
-    if grabTotal == 0 then
-        f.status:SetText("Nothing owned to grab.")
-        return
+    if #toGrab == 0 then ns.Print("No utility vanity items to grab.") return end
+    for _, e in ipairs(toGrab) do
+        RequestDeliverVanityCollectionItem(e.id)
     end
-    f.status:SetText(("Grabbing 0 / %d..."):format(grabTotal))
-    if C_Timer and C_Timer.NewTicker then
-        grabTicker = C_Timer.NewTicker(2, GrabStep)   -- 2s between deliveries
-    else
-        while #grabQueue > 0 do GrabStep() end
-    end
+    ns.Print("Grabbed " .. #toGrab .. " utility vanity item(s)" ..
+        (#missing > 0 and (" (" .. #missing .. " not owned).") or "."))
 end
 
 -- ------------------------------------------------- delete warchest duplicates
@@ -431,6 +346,78 @@ function ns.DeleteFelItems()
     StaticPopup_Show("HKSUITE_DELETE_FEL", c)
 end
 
+-- ------------------------------------------------- delete duplicate vanity
+-- A bag item is a "duplicate" if it's a vanity item whose collection entry you
+-- already own (you can re-deliver it from your collection any time).
+local function VanityItemMap()
+    local map = {}
+    if VANITY_ITEMS then
+        for k, v in pairs(VANITY_ITEMS) do
+            if v.itemid then map[v.itemid] = k end
+        end
+    end
+    return map
+end
+
+local function ScanDuplicates()
+    local map = VanityItemMap()
+    local found = {}
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots(bag) do
+            local link = GetContainerItemLink(bag, slot)
+            local id = link and tonumber(link:match("|Hitem:(%d+):"))
+            local vanityID = id and map[id]
+            if vanityID and C_VanityCollection.IsCollectionItemOwned(vanityID) then
+                found[#found + 1] = { bag = bag, slot = slot, id = id, name = bagItemName(link) or ("item:" .. id) }
+            end
+        end
+    end
+    return found
+end
+
+local pendingDupes = {}
+
+function ns.DoDeleteDuplicateVanity()
+    local c = 0
+    for _, e in ipairs(pendingDupes) do
+        local link = GetContainerItemLink(e.bag, e.slot)
+        local id = link and tonumber(link:match("|Hitem:(%d+):"))
+        if id == e.id then                       -- slot still holds the same item
+            PickupContainerItem(e.bag, e.slot)
+            DeleteCursorItem()
+            c = c + 1
+        end
+    end
+    pendingDupes = {}
+    ns.Print("Deleted " .. c .. " duplicate vanity item(s).")
+end
+
+StaticPopupDialogs["HKSUITE_DELETE_DUPES"] = {
+    text = "Delete %d duplicate vanity item(s) from your bags?\nSee chat for the full list. This cannot be undone.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function() ns.DoDeleteDuplicateVanity() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
+}
+
+function ns.DeleteDuplicateVanity()
+    if not ns.IsModuleEnabled("vanity") then return end
+    if not (VANITY_ITEMS and C_VanityCollection and C_VanityCollection.IsCollectionItemOwned) then
+        ns.Print("Vanity collection API not available on this client.")
+        return
+    end
+    pendingDupes = ScanDuplicates()
+    if #pendingDupes == 0 then ns.Print("No duplicate vanity items found in your bags.") return end
+
+    local names = {}
+    for i, e in ipairs(pendingDupes) do
+        if i > 40 then names[#names + 1] = "…"; break end
+        names[#names + 1] = e.name
+    end
+    ns.Print("Duplicate vanity items (" .. #pendingDupes .. "): " .. table.concat(names, ", "))
+    StaticPopup_Show("HKSUITE_DELETE_DUPES", #pendingDupes)
+end
+
 local function BuildOptionsPanel()
     local panel = CreateFrame("Frame")
     panel.name = "Auto-Grab Vanity"
@@ -441,43 +428,54 @@ local function BuildOptionsPanel()
     title:SetText("Auto-Grab Vanity")
 
     local gl = ns.CreateCheck(panel, "Grab unlearned vanity on login",
-        "Automatically deliver any unlearned vanity spells you own shortly after logging in.", cfg.grabOnLogin)
+        "Collects vanity spells you own but haven't learned yet.", cfg.grabOnLogin)
     gl:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
     gl:SetScript("OnClick", function(self) cfg.grabOnLogin = self:GetChecked() and true or false end)
 
     local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btn:SetSize(140, 24)
-    btn:SetText("Grab now")
+    btn:SetSize(210, 24)
+    btn:SetText("Grab unlearned vanity")
     btn:SetPoint("TOPLEFT", gl, "BOTTOMLEFT", 0, -14)
     btn:SetScript("OnClick", ns.GrabVanity)
 
     local felBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    felBtn:SetSize(220, 24)
+    felBtn:SetSize(210, 24)
     felBtn:SetText("Grab Fel Enchanted Warchest")
-    felBtn:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -10)
+    felBtn:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -8)
     felBtn:SetScript("OnClick", function() ns.GrabVanityById(657112, "Fel Enchanted Warchest") end)
 
     local bundleBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    bundleBtn:SetSize(220, 24)
+    bundleBtn:SetSize(210, 24)
     bundleBtn:SetText("Grab utility bundle")
-    bundleBtn:SetPoint("TOPLEFT", felBtn, "BOTTOMLEFT", 0, -10)
+    bundleBtn:SetPoint("TOPLEFT", felBtn, "BOTTOMLEFT", 0, -8)
     bundleBtn:SetScript("OnClick", ns.GrabVanityBundle)
 
     local bundleHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     bundleHint:SetPoint("TOPLEFT", bundleBtn, "BOTTOMLEFT", 2, -6)
     bundleHint:SetWidth(360); bundleHint:SetJustifyH("LEFT")
-    bundleHint:SetText("Anvil, Post Tube, Call Boards, Retreat scrolls, Feather, all Altars, Raid Markers. Owned only, 2s each, with a progress dialog.")
+    bundleHint:SetText("Collects your utility vanity items (anvils, call boards, altars, retreat scrolls, and more).")
 
     local delBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    delBtn:SetSize(220, 24)
+    delBtn:SetSize(210, 24)
     delBtn:SetText("Delete Fel Warchest items")
-    delBtn:SetPoint("TOPLEFT", bundleHint, "BOTTOMLEFT", -2, -16)
+    delBtn:SetPoint("TOPLEFT", bundleHint, "BOTTOMLEFT", -2, -18)
     delBtn:SetScript("OnClick", ns.DeleteFelItems)
 
     local delHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     delHint:SetPoint("TOPLEFT", delBtn, "BOTTOMLEFT", 2, -6)
     delHint:SetWidth(360); delHint:SetJustifyH("LEFT")
-    delHint:SetText("Deletes the Warchest's tabard, mount, gateway and companion duplicates from your bags (with confirmation). Bags are never touched.")
+    delHint:SetText("Removes the Fel Enchanted Warchest's leftover items from your bags.")
+
+    local dupBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    dupBtn:SetSize(210, 24)
+    dupBtn:SetText("Delete duplicate vanity items")
+    dupBtn:SetPoint("TOPLEFT", delHint, "BOTTOMLEFT", -2, -14)
+    dupBtn:SetScript("OnClick", ns.DeleteDuplicateVanity)
+
+    local dupHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    dupHint:SetPoint("TOPLEFT", dupBtn, "BOTTOMLEFT", 2, -6)
+    dupHint:SetWidth(360); dupHint:SetJustifyH("LEFT")
+    dupHint:SetText("Removes vanity items from your bags that you already own in your collection.")
 
     InterfaceOptions_AddCategory(panel)
 end

@@ -72,11 +72,11 @@ local function BuildOptionsPanel()
     end
 
     AddOption("Disable screen glow",
-        "Turns off the full-screen glow effect (ffxGlow).", "disableGlow")
+        "Turns off the full-screen glow effect.", "disableGlow")
     AddOption("Disable screen effects",
-        "Turns off the death and nether screen effects (ffxDeath, ffxNetherWorld).", "disableScreenEffects")
+        "Turns off the death and nether-world screen effects.", "disableScreenEffects")
     AddOption("Set weather density to 0",
-        "Removes rain, snow and other weather (weatherDensity).", "weatherZero")
+        "Removes rain, snow and other weather.", "weatherZero")
     AddOption("Enable fast auto loot",
         "Instantly loots everything when a corpse or object is opened.", "fastLoot")
     AddOption("Auto-confirm Bind-on-Pickup loot",
