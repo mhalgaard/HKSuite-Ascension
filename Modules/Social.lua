@@ -18,6 +18,7 @@ ns.defaults.social = {
     guildTabOnlyGuild = false, -- Guild tab shows only guild chat + whispers
     enableWorldTab   = false,  -- ensure a "World" tab exists on load
     enableLootTab    = false,  -- ensure a "Loot" tab exists on load
+    fontSize         = 12,     -- font size applied to all chat tabs
     -- Group invites
     autoAcceptGroup    = false,  -- accept party invites from friends/guildmates
     autoInvWhisper     = false,  -- invite players who whisper the keyword
@@ -40,6 +41,21 @@ local function ApplyClassColors()
     for _, info in pairs(ChatTypeInfo) do
         if type(info) == "table" then
             info.colorNameByClass = true
+        end
+    end
+end
+
+-- Apply a font size to every chat window.
+local function ApplyChatFontSize(size)
+    for i = 1, NUM_CHAT_WINDOWS do
+        local cf = _G["ChatFrame" .. i]
+        if cf then
+            if FCF_SetChatWindowFontSize then
+                pcall(FCF_SetChatWindowFontSize, nil, cf, size)
+            else
+                local face, _, flags = cf:GetFont()
+                pcall(cf.SetFont, cf, face, size, flags)
+            end
         end
     end
 end
@@ -278,9 +294,25 @@ local function BuildOptionsPanel()
         if cfg.enableLootTab and not FindChatTab("Loot") then CreateLootTab() end
     end)
 
+    local fontSlider = CreateFrame("Slider", "HKSuiteChatFontSlider", panel, "OptionsSliderTemplate")
+    fontSlider:SetPoint("TOPLEFT", lt, "BOTTOMLEFT", 4, -26)
+    fontSlider:SetMinMaxValues(8, 24)
+    fontSlider:SetValueStep(1)
+    fontSlider:SetWidth(200)
+    _G[fontSlider:GetName() .. "Low"]:SetText("8")
+    _G[fontSlider:GetName() .. "High"]:SetText("24")
+    fontSlider:SetValue(cfg.fontSize or 12)   -- set before wiring OnValueChanged
+    _G[fontSlider:GetName() .. "Text"]:SetText("Chat font size (all tabs): " .. (cfg.fontSize or 12))
+    fontSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value + 0.5)
+        cfg.fontSize = value
+        _G[self:GetName() .. "Text"]:SetText("Chat font size (all tabs): " .. value)
+        ApplyChatFontSize(value)
+    end)
+
     -- ---------------------------------------------------- Group invites section
     local invHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    invHdr:SetPoint("TOPLEFT", lt, "BOTTOMLEFT", 0, -16)
+    invHdr:SetPoint("TOPLEFT", fontSlider, "BOTTOMLEFT", -4, -22)
     invHdr:SetText("|cffffd100Group Invites|r")
 
     local ag = ns.CreateCheck(panel, "Auto-accept group invites from friends & guildmates",
@@ -339,6 +371,7 @@ function M:OnInit()
         if event == "PLAYER_ENTERING_WORLD" then
             if not ns.IsModuleEnabled("social") then return end
             if cfg.classColors then ApplyClassColors() end
+            ApplyChatFontSize(cfg.fontSize or 12)
             if cfg.autoJoinWorld and GetChannelName("World") == 0 then
                 JoinPermanentChannel("World")   -- idempotent
             end
