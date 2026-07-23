@@ -258,6 +258,27 @@ local function BuildOptionsPanel()
     eb:SetScript("OnEnterPressed", function(self) cfg.safeZonePet = self:GetText() self:ClearFocus() end)
     eb:SetScript("OnEscapePressed", function(self) self:SetText(cfg.safeZonePet or "") self:ClearFocus() end)
 
+    -- Explain the summon priority so it's clear what gets summoned when.
+    local logicHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    logicHdr:SetPoint("TOPLEFT", ebLabel, "BOTTOMLEFT", 0, -20)
+    logicHdr:SetText("|cffffd100Summon priority by situation|r")
+
+    local logic = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    logic:SetPoint("TOPLEFT", logicHdr, "BOTTOMLEFT", 0, -8)
+    logic:SetWidth(520)
+    logic:SetJustifyH("LEFT")
+    logic:SetSpacing(2)
+    logic:SetText(
+        "|cffaaaaaaHighest available pet you own wins; PvP/arena summons nothing.|r\n" ..
+        "• Manastorm:  Cogsley (Eye of the Manastorm)  >  Lootbot 3000\n" ..
+        "• Dungeon (Normal):  Wisdomball (first 15s of the run or right after an LFG completion)  >  Lootbot 3000\n" ..
+        "• Raid:  Lootbot 3000\n" ..
+        "• Open world:  Lootbot 3000  >  Book of Ascension  >  Treasure Keeper  >  Fix-o-Tron\n" ..
+        "• While leveling (before your first LFG completion):  Book of Ascension leads\n" ..
+        "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension\n" ..
+        "|cffaaaaaaWisdomball is only used in Normal dungeons, never Heroic/Mythic.|r"
+    )
+
     InterfaceOptions_AddCategory(panel)
 end
 
