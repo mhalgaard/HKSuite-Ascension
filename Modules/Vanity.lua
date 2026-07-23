@@ -223,6 +223,8 @@ local BUNDLE = {
     { id = 1903512, name = "Gnomish Portable Post Tube" },
     { id = 1913517, name = "Portable Call Board (Outlaw)" },
     { id = 499428,  name = "Raid Marker - Bundle" },
+    { id = 134985,  name = "Personal Bank" },
+    { id = 1180097, name = "Realm Bank" },
     { id = 977025,  name = "Feather of Ancients: Azeroth" },
     { id = 134989,  name = "Feather of Ancients: Azeroth" },
     { id = 2903513, name = "Mechanical Mystic Altar" },
@@ -346,9 +348,7 @@ function ns.DeleteFelItems()
     StaticPopup_Show("HKSUITE_DELETE_FEL", c)
 end
 
--- ------------------------------------------------- delete duplicate vanity
--- A bag item is a "duplicate" if it's a vanity item whose collection entry you
--- already own (you can re-deliver it from your collection any time).
+-- ------------------------------------------------- delete vanity from bags
 local function VanityItemMap()
     local map = {}
     if VANITY_ITEMS then
@@ -359,7 +359,8 @@ local function VanityItemMap()
     return map
 end
 
-local function ScanDuplicates()
+-- Vanity items whose collection entry you already own (re-grabbable clutter).
+local function ScanCollected()
     local map = VanityItemMap()
     local found = {}
     for bag = 0, 4 do
@@ -375,11 +376,31 @@ local function ScanDuplicates()
     return found
 end
 
-local pendingDupes = {}
+-- Extra copies of the same vanity item in bags (keeps one of each).
+local function ScanDuplicateCopies()
+    local map = VanityItemMap()
+    local kept, found = {}, {}
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots(bag) do
+            local link = GetContainerItemLink(bag, slot)
+            local id = link and tonumber(link:match("|Hitem:(%d+):"))
+            if id and map[id] then
+                if kept[id] then
+                    found[#found + 1] = { bag = bag, slot = slot, id = id, name = bagItemName(link) or ("item:" .. id) }
+                else
+                    kept[id] = true   -- keep the first copy
+                end
+            end
+        end
+    end
+    return found
+end
 
-function ns.DoDeleteDuplicateVanity()
+local pending = {}
+
+function ns.DoDeleteVanityPending()
     local c = 0
-    for _, e in ipairs(pendingDupes) do
+    for _, e in ipairs(pending) do
         local link = GetContainerItemLink(e.bag, e.slot)
         local id = link and tonumber(link:match("|Hitem:(%d+):"))
         if id == e.id then                       -- slot still holds the same item
@@ -388,34 +409,46 @@ function ns.DoDeleteDuplicateVanity()
             c = c + 1
         end
     end
-    pendingDupes = {}
-    ns.Print("Deleted " .. c .. " duplicate vanity item(s).")
+    pending = {}
+    ns.Print("Deleted " .. c .. " vanity item(s).")
 end
 
-StaticPopupDialogs["HKSUITE_DELETE_DUPES"] = {
-    text = "Delete %d duplicate vanity item(s) from your bags?\nSee chat for the full list. This cannot be undone.",
+StaticPopupDialogs["HKSUITE_DELETE_VANITY"] = {
+    text = "Delete %d vanity item(s) from your bags?\nSee chat for the list. This cannot be undone.",
     button1 = YES,
     button2 = NO,
-    OnAccept = function() ns.DoDeleteDuplicateVanity() end,
+    OnAccept = function() ns.DoDeleteVanityPending() end,
     timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
 }
 
-function ns.DeleteDuplicateVanity()
+local function PrepareDelete(found, label)
+    pending = found
+    if #pending == 0 then ns.Print("No " .. label .. " found in your bags.") return end
+    local names = {}
+    for i, e in ipairs(pending) do
+        if i > 40 then names[#names + 1] = "…"; break end
+        names[#names + 1] = e.name
+    end
+    ns.Print("Deleting " .. #pending .. " " .. label .. ": " .. table.concat(names, ", "))
+    StaticPopup_Show("HKSUITE_DELETE_VANITY", #pending)
+end
+
+function ns.DeleteCollectedVanity()
     if not ns.IsModuleEnabled("vanity") then return end
     if not (VANITY_ITEMS and C_VanityCollection and C_VanityCollection.IsCollectionItemOwned) then
         ns.Print("Vanity collection API not available on this client.")
         return
     end
-    pendingDupes = ScanDuplicates()
-    if #pendingDupes == 0 then ns.Print("No duplicate vanity items found in your bags.") return end
+    PrepareDelete(ScanCollected(), "collected vanity items")
+end
 
-    local names = {}
-    for i, e in ipairs(pendingDupes) do
-        if i > 40 then names[#names + 1] = "…"; break end
-        names[#names + 1] = e.name
+function ns.DeleteDuplicateVanity()
+    if not ns.IsModuleEnabled("vanity") then return end
+    if not VANITY_ITEMS then
+        ns.Print("Vanity collection API not available on this client.")
+        return
     end
-    ns.Print("Duplicate vanity items (" .. #pendingDupes .. "): " .. table.concat(names, ", "))
-    StaticPopup_Show("HKSUITE_DELETE_DUPES", #pendingDupes)
+    PrepareDelete(ScanDuplicateCopies(), "duplicate vanity items")
 end
 
 local function BuildOptionsPanel()
@@ -466,16 +499,27 @@ local function BuildOptionsPanel()
     delHint:SetWidth(360); delHint:SetJustifyH("LEFT")
     delHint:SetText("Removes the Fel Enchanted Warchest's leftover items from your bags.")
 
+    local collectedBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    collectedBtn:SetSize(210, 24)
+    collectedBtn:SetText("Delete collected vanity items")
+    collectedBtn:SetPoint("TOPLEFT", delHint, "BOTTOMLEFT", -2, -14)
+    collectedBtn:SetScript("OnClick", ns.DeleteCollectedVanity)
+
+    local collectedHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    collectedHint:SetPoint("TOPLEFT", collectedBtn, "BOTTOMLEFT", 2, -6)
+    collectedHint:SetWidth(360); collectedHint:SetJustifyH("LEFT")
+    collectedHint:SetText("Removes vanity items from your bags that you already own in your collection.")
+
     local dupBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     dupBtn:SetSize(210, 24)
     dupBtn:SetText("Delete duplicate vanity items")
-    dupBtn:SetPoint("TOPLEFT", delHint, "BOTTOMLEFT", -2, -14)
+    dupBtn:SetPoint("TOPLEFT", collectedHint, "BOTTOMLEFT", -2, -14)
     dupBtn:SetScript("OnClick", ns.DeleteDuplicateVanity)
 
     local dupHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     dupHint:SetPoint("TOPLEFT", dupBtn, "BOTTOMLEFT", 2, -6)
     dupHint:SetWidth(360); dupHint:SetJustifyH("LEFT")
-    dupHint:SetText("Removes vanity items from your bags that you already own in your collection.")
+    dupHint:SetText("Removes extra copies of vanity items, keeping one of each.")
 
     InterfaceOptions_AddCategory(panel)
 end

@@ -27,7 +27,21 @@ apply after a reload.
 
 ## Modules
 
-### Quest Automation
+| Module | Default | Summary |
+|---|---|---|
+| Quest Automation | On | Auto accept / turn in / reward pick / gossip skip; daily & callboard toggles |
+| Item Deletion | On | Auto-fills the DELETE prompt; optional instant delete |
+| Social | On | Class colors, chat tabs, World channel, group-invite automation |
+| System | On | Screen effects, weather, fast loot, BoP confirm, camera distance |
+| Chat Filters | On *(filters off)* | Hide Ascension broadcast & channel spam |
+| Addon Button | On | Consolidate minimap buttons into one HK flyout |
+| Auto-Grab Vanity | On | Collect & tidy up vanity-collection items |
+| Loot Auto Roller | Off | Auto-roll on group loot, by item quality |
+| Auto Summon Pets | Off | Context-based premium-pet summoning |
+
+<details>
+<summary><b>Quest Automation</b></summary>
+
 | Option | Default | What it does |
 |---|---|---|
 | Auto-accept quests | **On** | Accepts offered quests automatically (incl. shared/escort confirmations). |
@@ -38,63 +52,93 @@ apply after a reload.
 | Auto-accept callboard / command board quests | Off | Callboard/command board quests are not auto-accepted unless this is on. |
 
 A **bypass key** (default: Shift) pauses all quest automation while held.
+</details>
 
-### Item Deletion
+<details>
+<summary><b>Item Deletion</b></summary>
+
 | Option | Default | What it does |
 |---|---|---|
 | Auto-fill "DELETE" in deletion prompts | **On** | Pre-fills the required `DELETE` word, so it's one click to confirm. |
 | Instant delete (skip the confirmation) | Off | Deletes immediately with no dialog. Use with care — deletions are unrecoverable. |
+</details>
 
-### Social
+<details>
+<summary><b>Social</b></summary>
+
 - **Class colors** in all chat channels (default on).
 - **Auto-join the World channel** on login (default on).
 - **Chat font size** slider for all tabs (default 12).
-- Auto-create configured chat tabs (checked-and-created on login, per character):
+- Auto-create configured chat tabs (per character):
   - **Guild** tab — all chat + XP/honor/rep/skill-ups/loot/money/system/errors/ignored (with an option to show only guild chat & whispers).
   - **World** tab — the Ascension / World / LookingForGroup / Trade channels + whispers.
-  - **Loot** tab — item loot, money, rolls (system) + whispers.
-- **Group invites**: auto-accept invites from friends/guildmates; auto-invite anyone who whispers a keyword (default `inv`), optionally restricted to friends/guildmates.
+  - **Loot** tab — item loot, money, rolls + whispers.
+- **Group invites** — auto-accept invites from friends/guildmates; auto-invite anyone who whispers a keyword (default `inv`), optionally restricted to friends/guildmates.
+</details>
 
-### System
+<details>
+<summary><b>System</b></summary>
+
 | Option | Default | What it does |
 |---|---|---|
-| Disable screen glow | Off | `ffxGlow` off. |
-| Disable screen effects | Off | Death/nether effects off (`ffxDeath`, `ffxNetherWorld`). |
-| Set weather density to 0 | Off | Removes rain/snow/weather. |
-| Enable fast auto loot | Off | Instantly loots on opening a corpse/object. |
-| Auto-confirm Bind-on-Pickup loot | Off | Auto-confirms the BoP loot prompt, any quality. |
-| Camera distance | — | Slider (Min→Max); only manages the CVar once moved. |
+| Disable screen glow | Off | Turns off the full-screen glow. |
+| Disable screen effects | Off | Turns off the death / nether-world effects. |
+| Set weather density to 0 | Off | Removes rain, snow and weather. |
+| Enable fast auto loot | Off | Instantly loots corpses and objects. |
+| Auto-confirm Bind-on-Pickup loot | Off | Confirms the BoP loot prompt for you, any quality. |
+| Camera distance | — | Slider from minimum to maximum zoom. |
+</details>
 
-### Loot Auto Roller  *(default: disabled)*
-Auto-rolls on group loot by item quality (Uncommon → Vanity), with:
-- Toggles: also roll BoP items; greed when an item can't be disenchanted; greed when it can't be need-rolled; skip the BoP roll confirmation.
-- **Overrides** (take priority over the quality settings): per-quality actions for **Mystic Scrolls** and **Worldforged Scrolls**, and a **Specific Item Types** section (Worldforged Key Fragments, Doomshot, Miniature Cannon Balls, plus Zul'Gurub / Molten Core / Blackwing Lair item groups) — matched by item name.
+<details>
+<summary><b>Chat Filters</b> <i>(all filters off by default)</i></summary>
 
-### Auto Summon Pets  *(default: disabled)*
-Summons the right premium pet for your situation (Manastorm, dungeon, raid, open
-world, safe zone), leaving PvP alone. On login, summons the best pet if none is
-active. Options for combat/zone-change/recast-delay, a Loot-Transfigurator skip,
-and a custom safe-zone pet. (Wisdomball is only summoned in Normal dungeons.)
-
-### Addon Button
-A movable square **HK** button near the minimap consolidates other addons'
-minimap buttons into one flyout. Click to open the menu, **Shift+click** for
-HKSuite options, **CTRL+drag** to move it.
-
-### Auto-Grab Vanity
-Automatically delivers unlearned vanity-collection spells you already own — on
-login and via a "Grab now" button. Handles Manastorm consumables, ranked
-upgrades, and skips bundles that would hand over an unusable item. (Ported from
-XanAscTweaks.)
-
-### Chat Filters  *(all filters off by default)*
-Suppress Ascension spam. Grouped with an **All on / All off** toggle:
+Hide Ascension spam, grouped with an **All on / All off** toggle:
 - **Rest areas:** hide /say and /yell while in a city.
 - **System broadcasts:** trials/nightmares, mystic altars, autobroadcasts, travel guides, keeper's scrolls, motherlodes, criminal intent, hardcore, posture check, faction-leader spawns, and world-boss spawn alerts.
 - **Channel spam:** `bau`, `dp` (not `dps`), `twitch`, `discord.gg` in public channels.
 - **Default chat tab:** remove the Newcomers / Ascension / World channels.
 
 (Ported from XanAscTweaks — disable that addon's overlapping options to avoid double behavior.)
+</details>
+
+<details>
+<summary><b>Addon Button</b></summary>
+
+A movable square **HK** button near the minimap consolidates other addons'
+minimap buttons into one flyout. Click to open the menu, **Shift+click** for
+HKSuite options, **CTRL+drag** to move it.
+</details>
+
+<details>
+<summary><b>Auto-Grab Vanity</b></summary>
+
+Collect and tidy up your vanity-collection items:
+- **Grab unlearned vanity** — delivers vanity spells you own but haven't learned (also runs on login if enabled).
+- **Grab Fel Enchanted Warchest** — delivers the Warchest if you own it.
+- **Grab utility bundle** — delivers your owned utility vanity (anvils, call boards, altars, retreat scrolls, feather, raid markers).
+- **Delete Fel Warchest items** — removes the Warchest's leftover items from your bags.
+- **Delete collected vanity items** — removes bag vanity you already own in your collection.
+- **Delete duplicate vanity items** — removes extra copies, keeping one of each.
+
+All deletions ask for confirmation and never touch bag containers. (Grab logic ported from XanAscTweaks.)
+</details>
+
+<details>
+<summary><b>Loot Auto Roller</b> <i>(default: disabled)</i></summary>
+
+Auto-rolls on group loot by item quality (Uncommon → Vanity), with:
+- Toggles: also roll BoP items; greed when an item can't be disenchanted; greed when it can't be need-rolled; skip the BoP roll confirmation.
+- **Overrides** (take priority over the quality settings): per-quality actions for **Mystic Scrolls** and **Worldforged Scrolls**, and a **Specific Item Types** section (Worldforged Key Fragments, Doomshot, Miniature Cannon Balls, plus Zul'Gurub / Molten Core / Blackwing Lair item groups).
+</details>
+
+<details>
+<summary><b>Auto Summon Pets</b> <i>(default: disabled)</i></summary>
+
+Summons the right premium pet for your situation (Manastorm, dungeon, raid, open
+world, safe zone), leaving PvP alone. On login, summons the best pet if none is
+active. Options for combat / zone-change / recast delay, a Loot-Transfigurator
+skip, and a custom safe-zone pet. (Wisdomball is only summoned in Normal dungeons.)
+</details>
 
 ## Releases
 Pushing a `vX.Y.Z` tag triggers a GitHub Action that packages the addon and
