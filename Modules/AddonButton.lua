@@ -124,7 +124,7 @@ local function CreateWidgets()
     button:SetClampedToScreen(true)
     button:SetMovable(true)
     button:RegisterForDrag("LeftButton")
-    button:RegisterForClicks("LeftButtonUp")
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     label:SetPoint("CENTER")
@@ -139,7 +139,13 @@ local function CreateWidgets()
         local point, _, relPoint, x, y = self:GetPoint()
         cfg.buttonPos = { point, relPoint, x, y }
     end)
-    button:SetScript("OnClick", function()
+    button:SetScript("OnClick", function(self, mouseButton)
+        if mouseButton == "RightButton" then
+            if IsShiftKeyDown() and IsControlKeyDown() and ns.ClearQuests then
+                ns.ClearQuests(false)   -- instant clear using the whitelist/settings
+            end
+            return
+        end
         if IsControlKeyDown() then return end   -- CTRL is reserved for dragging
         if IsShiftKeyDown() then
             InterfaceOptionsFrame_OpenToCategory(ns.overviewPanel)
@@ -153,6 +159,7 @@ local function CreateWidgets()
         GameTooltip:SetText("HKSuite")
         GameTooltip:AddLine("Click: addon buttons menu", 1, 1, 1)
         GameTooltip:AddLine("Shift+click: HKSuite options", 1, 1, 1)
+        GameTooltip:AddLine("Shift+CTRL+right-click: clear quests", 1, 1, 1)
         GameTooltip:AddLine("CTRL+drag: move this button", 1, 1, 1)
         GameTooltip:Show()
     end)

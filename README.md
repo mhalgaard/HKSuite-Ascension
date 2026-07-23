@@ -34,6 +34,7 @@ apply after a reload.
 | Social | On | Class colors, chat tabs, World channel, group-invite automation |
 | System | On | Screen effects, weather, fast loot, BoP confirm, camera distance |
 | Chat Filters | On *(filters off)* | Hide Ascension broadcast & channel spam |
+| Clear Quests | On | Abandon unwanted quests, keeping the ones you choose |
 | Addon Button | On | Consolidate minimap buttons into one HK flyout |
 | Auto-Grab Vanity | On | Collect & tidy up vanity-collection items |
 | Loot Auto Roller | Off | Auto-roll on group loot, by item quality |
@@ -105,8 +106,21 @@ Hide Ascension spam, grouped with an **All on / All off** toggle:
 <summary><b>Addon Button</b></summary>
 
 A movable square **HK** button near the minimap consolidates other addons'
-minimap buttons into one flyout. Click to open the menu, **Shift+click** for
-HKSuite options, **CTRL+drag** to move it.
+minimap buttons into one flyout. **Click** opens the menu, **Shift+click** opens
+HKSuite options, **Shift+CTRL+right-click** clears quests (per Clear Quests
+settings), and **CTRL+drag** moves it.
+</details>
+
+<details>
+<summary><b>Clear Quests</b></summary>
+
+Abandon unwanted quests in one click, keeping the ones you want:
+- Keep completed / daily / dungeon / Path-to-Ascension quests, quests with
+  progress, and anything on your **whitelist** (each toggleable, with separate
+  "include trivial" sub-options).
+- Prestige and Mentorship quests are always kept.
+- **Clear quests now** button (asks for confirmation and lists what it will
+  abandon). The HK button's **Shift+CTRL+right-click** does it instantly.
 </details>
 
 <details>
