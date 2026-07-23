@@ -6,10 +6,23 @@ ns.version = "1.2.0"
 ns.modules = {}
 ns.defaults = {}   -- modules populate this at file-load time
 
--- Chat helper.
+-- Chat helper. Echoes to the General tab and, if it exists, a "Guild" tab too.
 local PREFIX = "|cff1eff00HKSuite|r: "
+local function GuildChatFrame()
+    for i = 1, NUM_CHAT_WINDOWS do
+        local name = GetChatWindowInfo(i)
+        if name and name:lower() == "guild" then
+            return _G["ChatFrame" .. i]
+        end
+    end
+end
 function ns.Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. tostring(msg))
+    local text = PREFIX .. tostring(msg)
+    DEFAULT_CHAT_FRAME:AddMessage(text)
+    local gf = GuildChatFrame()
+    if gf and gf ~= DEFAULT_CHAT_FRAME then
+        gf:AddMessage(text)
+    end
 end
 
 -- Register a module table. Recognised fields:
