@@ -377,19 +377,18 @@ local function isOwnedVanity(bag, slot)
     scanTip:SetOwner(UIParent, "ANCHOR_NONE")
     scanTip:ClearLines()
     scanTip:SetBagItem(bag, slot)
+    local owned, bound = false, false
     for i = 1, scanTip:NumLines() do
         local fs = _G["HKSuiteVanityScanTipTextLeft" .. i]
         local text = fs and fs:GetText()
         if text then
             local t = text:lower()
-            -- Match "You own this vanity item" but NOT "You do not / don't own ...".
-            if t:find("own this vanity item", 1, true)
-                and not (t:find("not own", 1, true) or t:find("n't own", 1, true)) then
-                return true
-            end
+            -- The full "you own" prefix excludes the negatives ("You don't own…").
+            if t:find("you own this vanity item", 1, true) then owned = true end
+            if t:find("soulbound", 1, true) then bound = true end
         end
     end
-    return false
+    return owned and bound   -- only delete owned vanity that is soulbound
 end
 
 -- All owned vanity items in bags.
