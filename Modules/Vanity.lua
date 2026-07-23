@@ -380,8 +380,13 @@ local function isOwnedVanity(bag, slot)
     for i = 1, scanTip:NumLines() do
         local fs = _G["HKSuiteVanityScanTipTextLeft" .. i]
         local text = fs and fs:GetText()
-        if text and text:lower():find("own this vanity item", 1, true) then
-            return true
+        if text then
+            local t = text:lower()
+            -- Match "You own this vanity item" but NOT "You do not / don't own ...".
+            if t:find("own this vanity item", 1, true)
+                and not (t:find("not own", 1, true) or t:find("n't own", 1, true)) then
+                return true
+            end
         end
     end
     return false
