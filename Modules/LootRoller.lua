@@ -100,26 +100,53 @@ local function ResolveAction(name, quality)
     return cfg.quality[quality]
 end
 
--- Hide the group-loot window for a rollID. The default UI hides it inside the
--- roll buttons' OnClick; since we call RollOnLoot directly we must hide it too.
--- Replacements like ElvUI use their own bars (not GroupLootFrame1..4) but still
--- tag the frame with `.rollID`, so we also sweep all frames for a match.
-local function CloseRollFrame(rollID)
+-- One-shot delayed call (C_Timer when available, else an OnUpdate fallback).
+local function After(delay, fn)
+    if C_Timer and C_Timer.After then C_Timer.After(delay, fn); return end
+    local f = CreateFrame("Frame")
+    local elapsed = 0
+    f:SetScript("OnUpdate", function(self, e)
+        elapsed = elapsed + e
+        if elapsed >= delay then self:SetScript("OnUpdate", nil); fn() end
+    end)
+end
+
+-- Hide/release the group-loot window for a rollID. The default UI hides it in
+-- the roll buttons' OnClick; since we call RollOnLoot directly we must do it.
+-- ElvUI replaces the frames with its own bars (Misc.RollBars) that it only
+-- releases on CANCEL_LOOT_ROLL, so we release its bar via its module API too.
+local function HideRollFrameNow(rollID)
     -- Default Blizzard group-loot frames.
     for i = 1, (NUM_GROUP_LOOT_FRAMES or 4) do
         local f = _G["GroupLootFrame" .. i]
         if f and f.rollID == rollID then f:Hide() end
     end
-    -- Any other addon's roll frame (e.g. ElvUI's loot bars) tracking this rollID.
+    -- ElvUI: release its loot bar for this rollID (frees it for reuse + hides).
+    local Misc = ElvUI and ElvUI[1] and ElvUI[1]:GetModule("Misc", true)
+    if Misc and Misc.RollBars then
+        for _, frame in ipairs(Misc.RollBars) do
+            if frame.rollID == rollID then
+                if Misc.ReleaseFrame then pcall(Misc.ReleaseFrame, Misc, frame)
+                else pcall(frame.Hide, frame) end
+                break
+            end
+        end
+    end
+    -- Generic fallback: any other replacement frame tagged with this rollID.
     if EnumerateFrames then
         local f = EnumerateFrames()
         while f do
-            if f.rollID == rollID and f.IsShown and f:IsShown() then
-                pcall(f.Hide, f)
-            end
+            if f.rollID == rollID and f.IsShown and f:IsShown() then pcall(f.Hide, f) end
             f = EnumerateFrames(f)
         end
     end
+end
+
+-- Run immediately (frames already built) and again shortly after, since a
+-- replacement bar (ElvUI) may be created after our roll fires this same event.
+local function CloseRollFrame(rollID)
+    HideRollFrameNow(rollID)
+    After(0.1, function() HideRollFrameNow(rollID) end)
 end
 
 -- Decide and cast the roll for a given rollID.
