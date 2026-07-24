@@ -50,7 +50,8 @@ local MELEE_SPELLS = {
     "Maul", "Mangle (Bear)", "Mangle (Cat)", "Shred", "Claw", "Rake", "Ferocious Bite", "Ravage",
 }
 
-local cachedSpell   -- last melee ability that resolved as known
+local cachedSpell    -- last melee ability that resolved as known
+local lastCastSpell  -- most recent spell the player cast (for the "use last" button)
 
 -- IsSpellInRange returns 1 (in range), 0 (out of range), or nil (unknown spell /
 -- invalid target). With a valid hostile target, a known melee spell returns 0/1,
@@ -288,12 +289,13 @@ local function BuildOptionsPanel()
         end
     end
 
-    local function SaveSpell()
-        cfg.rangeSpell = (spellBox:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local function ApplySpell(name)
+        cfg.rangeSpell = (name or ""):gsub("^%s+", ""):gsub("%s+$", "")
         cachedSpell = nil            -- force re-resolve with the new preference
         spellBox:SetText(cfg.rangeSpell)
         RefreshSaved()
     end
+    local function SaveSpell() ApplySpell(spellBox:GetText()) end
 
     spellBox:SetScript("OnEnterPressed", function(self) SaveSpell(); self:ClearFocus() end)
     spellBox:SetScript("OnEditFocusLost", SaveSpell)
@@ -310,19 +312,33 @@ local function BuildOptionsPanel()
     savedLabel:SetPoint("TOPLEFT", spellBox, "BOTTOMLEFT", 0, -6)
     RefreshSaved()
 
-    -- Shift-click a spell from the spellbook into the box while it has focus.
+    -- Reliable capture: set to the last ability you cast. (The Blizzard spellbook
+    -- can't be open at the same time as this options panel, which is why
+    -- shift-clicking a spell here usually can't work.)
+    local lastBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    lastBtn:SetSize(190, 22)
+    lastBtn:SetPoint("TOPLEFT", savedLabel, "BOTTOMLEFT", 0, -6)
+    lastBtn:SetText("Set from last-used ability")
+    lastBtn:SetScript("OnClick", function()
+        if lastCastSpell and lastCastSpell ~= "" then
+            ApplySpell(lastCastSpell)
+            ns.Print("Range ability set to: " .. lastCastSpell)
+        else
+            ns.Print("Cast your melee ability once, then click 'Set from last-used ability'.")
+        end
+    end)
+
+    -- Also accept a Shift-clicked spell link if the box has focus (works with a
+    -- standalone spell list; the default spellbook closes this panel).
     hooksecurefunc("ChatEdit_InsertLink", function(link)
         if link and spellBox:HasFocus() then
-            local name = tostring(link):match("%[(.-)%]") or tostring(link)
-            spellBox:SetText(name)
-            SaveSpell()
-            return true
+            ApplySpell(tostring(link):match("%[(.-)%]") or tostring(link))
         end
     end)
 
     local tipShift = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    tipShift:SetPoint("TOPLEFT", savedLabel, "BOTTOMLEFT", 0, -4)
-    tipShift:SetText("Tip: click in the box, then Shift-click an ability in your spellbook to fill it.")
+    tipShift:SetPoint("TOPLEFT", lastBtn, "BOTTOMLEFT", 0, -6)
+    tipShift:SetText("Type the exact ability name and click OK, or use the button above.")
 
     local trinket = ns.CreateCheck(panel, "Enable trinket tracker",
         "Shows your equipped trinkets and their cooldowns in a box. Hold Ctrl and left-drag to move it.",
@@ -353,7 +369,14 @@ function M:OnInit()
     ev:RegisterEvent("BAG_UPDATE_COOLDOWN")
     ev:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
     ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
-    ev:SetScript("OnEvent", function()
+    ev:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    ev:SetScript("OnEvent", function(_, event, unit, spellName)
+        if event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if unit == "player" and spellName and spellName ~= "" then
+                lastCastSpell = spellName
+            end
+            return
+        end
         UpdateTrinkets()
     end)
 

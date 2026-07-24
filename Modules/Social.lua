@@ -177,6 +177,64 @@ local function EnsureTabs()
     if cfg.enableLootTab and not FindChatTab("Loot") then CreateLootTab() end
 end
 
+-- Reconfigure an existing World/Loot frame's message groups + channels.
+local function ConfigureWorldFrame(frame)
+    ChatFrame_RemoveAllMessageGroups(frame)
+    AddGroup(frame, "WHISPER")
+    if ChatFrame_RemoveAllChannels then ChatFrame_RemoveAllChannels(frame) end
+    for _, ch in ipairs(WORLD_CHANNELS) do ChatFrame_AddChannel(frame, ch) end
+end
+
+local function ConfigureLootFrame(frame)
+    ChatFrame_RemoveAllMessageGroups(frame)
+    for _, g in ipairs(LOOT_TAB_GROUPS) do AddGroup(frame, g) end
+    if ChatFrame_RemoveAllChannels then ChatFrame_RemoveAllChannels(frame) end
+end
+
+-- Print current chat-window state so tab problems are diagnosable in-game.
+local function ChatTabDiag()
+    ns.Print("Chat diagnostic — ElvUI: " .. (ElvUI and "loaded" or "not loaded")
+        .. ", windows: " .. NUM_CHAT_WINDOWS)
+    for i = 1, NUM_CHAT_WINDOWS do
+        local name, _, _, _, _, _, shown, _, docked = GetChatWindowInfo(i)
+        if name and name ~= "" then
+            ns.Print(("  [%d] \"%s\"  shown=%s docked=%s")
+                :format(i, name, tostring(shown), tostring(docked)))
+        end
+    end
+end
+
+-- User-driven: create the enabled tabs, or reconfigure them if they already
+-- exist. Verbose so the result is always visible in chat.
+local function RefreshTabs(verbose)
+    if not ns.IsModuleEnabled("social") then
+        if verbose then ns.Print("Social module is disabled.") end
+        return
+    end
+    if verbose then ChatTabDiag() end
+
+    if not (cfg.enableGuildTab or cfg.enableWorldTab or cfg.enableLootTab) then
+        if verbose then ns.Print("No chat tabs are enabled above — tick one first.") end
+        return
+    end
+
+    if cfg.enableGuildTab then
+        local f = FindChatTab("Guild")
+        if f then ConfigureGuildFrame(f); if verbose then ns.Print("Refreshed existing \"Guild\" tab.") end
+        else CreateGuildTab() end
+    end
+    if cfg.enableWorldTab then
+        local f = FindChatTab("World")
+        if f then ConfigureWorldFrame(f); if verbose then ns.Print("Refreshed existing \"World\" tab.") end
+        else CreateWorldTab() end
+    end
+    if cfg.enableLootTab then
+        local f = FindChatTab("Loot")
+        if f then ConfigureLootFrame(f); if verbose then ns.Print("Refreshed existing \"Loot\" tab.") end
+        else CreateLootTab() end
+    end
+end
+
 -- =========================== Friends / guildmates ============================
 
 local function EqualsName(a, b)
@@ -294,8 +352,14 @@ local function BuildOptionsPanel()
         if cfg.enableLootTab and not FindChatTab("Loot") then CreateLootTab() end
     end)
 
+    local tabBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    tabBtn:SetSize(220, 22)
+    tabBtn:SetText("Create / refresh chat tabs now")
+    tabBtn:SetPoint("TOPLEFT", lt, "BOTTOMLEFT", 4, -8)
+    tabBtn:SetScript("OnClick", function() RefreshTabs(true) end)
+
     local fontSlider = CreateFrame("Slider", "HKSuiteChatFontSlider", panel, "OptionsSliderTemplate")
-    fontSlider:SetPoint("TOPLEFT", lt, "BOTTOMLEFT", 4, -26)
+    fontSlider:SetPoint("TOPLEFT", tabBtn, "BOTTOMLEFT", 0, -26)
     fontSlider:SetMinMaxValues(8, 24)
     fontSlider:SetValueStep(1)
     fontSlider:SetWidth(200)
