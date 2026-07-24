@@ -250,8 +250,6 @@ function M:OnInit()
                 LootSlot(i)
             end
         elseif event == "LOOT_BIND_CONFIRM" then
-            ns.Print("[debug] LOOT_BIND_CONFIRM slot=" .. tostring(arg1)
-                .. " autoConfirmBoP=" .. tostring(cfg.autoConfirmBoP))
             if cfg.autoConfirmBoP then
                 ConfirmLootSlot(arg1)         -- arg1 = loot slot index
                 StaticPopup_Hide("LOOT_BIND")

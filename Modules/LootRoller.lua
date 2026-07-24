@@ -367,10 +367,6 @@ function M:OnInit()
         if event == "START_LOOT_ROLL" then
             DoRoll(id)
         elseif event == "CONFIRM_LOOT_ROLL" then
-            ns.Print("[debug] CONFIRM_LOOT_ROLL id=" .. tostring(id)
-                .. " type=" .. tostring(rollType)
-                .. " ours=" .. tostring(autoRolled[id] ~= nil)
-                .. " skip=" .. tostring(cfg.skipBoPConfirm))
             if autoRolled[id] and cfg.skipBoPConfirm then   -- only confirm our own rolls
                 ConfirmLootRoll(id, rollType)
                 StaticPopup_Hide("CONFIRM_LOOT_ROLL")
