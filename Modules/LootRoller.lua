@@ -100,6 +100,17 @@ local function ResolveAction(name, quality)
     return cfg.quality[quality]
 end
 
+-- Hide the group-loot window for a rollID. The default UI hides it inside the
+-- roll buttons' OnClick; since we call RollOnLoot directly we must hide it too.
+local function CloseRollFrame(rollID)
+    for i = 1, (NUM_GROUP_LOOT_FRAMES or 4) do
+        local f = _G["GroupLootFrame" .. i]
+        if f and f.rollID == rollID then
+            f:Hide()
+        end
+    end
+end
+
 -- Decide and cast the roll for a given rollID.
 local function DoRoll(rollID)
     if not ns.IsModuleEnabled("lootroll") then return end
@@ -137,6 +148,7 @@ local function DoRoll(rollID)
 
     autoRolled[rollID] = true
     RollOnLoot(rollID, rollType)
+    CloseRollFrame(rollID)
 end
 
 -- ============================== Options page =================================
@@ -320,6 +332,7 @@ function M:OnInit()
             if autoRolled[id] and cfg.skipBoPConfirm then   -- only confirm our own rolls
                 ConfirmLootRoll(id, rollType)
                 autoRolled[id] = nil
+                CloseRollFrame(id)
             end
         end
     end)

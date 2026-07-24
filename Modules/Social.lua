@@ -170,21 +170,36 @@ end
 -- Create the enabled tabs if they don't already exist. Idempotent, so it's safe
 -- to run on every login: existing tabs (stored per-character by Blizzard) are
 -- left alone; a fresh character with the option enabled gets them made.
+-- Nudge ElvUI to re-lay-out its chat panel so a re-docked frame appears as a tab
+-- rather than floating over the General window.
+local function KickElvUIChat()
+    if not (ElvUI and ElvUI[1]) then return end
+    local CH = ElvUI[1]:GetModule("Chat", true)
+    if not CH then return end
+    if CH.PositionChat then pcall(CH.PositionChat, CH, true) end
+    if CH.UpdateChatTabs then pcall(CH.UpdateChatTabs, CH) end
+end
+
 -- Re-dock and show a chat frame that exists but was closed/undocked (e.g. after
--- an ElvUI profile reset wipes the chat layout). pcall'd so an ElvUI dock hook
--- erroring can't break the rest.
+-- an ElvUI profile reset wipes the chat layout). Runs even if the frame is
+-- currently shown-but-undocked (floating on top of General). pcall'd so an
+-- ElvUI dock hook erroring can't break the rest.
 local function ShowChatFrame(frame)
-    if not frame or frame:IsShown() then return end
+    if not frame then return end
     local docked = frame.isDocked
         or (DOCKED_CHAT_FRAMES and tContains(DOCKED_CHAT_FRAMES, frame))
     if not docked and FCF_DockFrame and DOCKED_CHAT_FRAMES then
-        pcall(FCF_DockFrame, frame, (#DOCKED_CHAT_FRAMES + 1), false)
+        pcall(function() frame:SetUserPlaced(false) end)  -- drop any stale floating position
+        pcall(FCF_DockFrame, frame, (#DOCKED_CHAT_FRAMES + 1), nil)
     end
     if FCF_SetLocked then pcall(FCF_SetLocked, frame, 1) end
     frame:Show()
     local tab = _G[frame:GetName() .. "Tab"]
     if tab then tab:Show() end
     if FCF_DockUpdate then pcall(FCF_DockUpdate) end
+    -- Keep General selected so the re-docked frame sits as a tab, not covering it.
+    if ChatFrame1 and FCF_SelectDockFrame then pcall(FCF_SelectDockFrame, ChatFrame1) end
+    KickElvUIChat()
 end
 
 -- Ensure a single tab exists and is visible: create it if missing, or re-open it
@@ -258,6 +273,8 @@ local function RefreshTabs(verbose)
         if f then ConfigureLootFrame(f); ShowChatFrame(f); if verbose then ns.Print("Refreshed & opened \"Loot\" tab.") end
         else CreateLootTab() end
     end
+
+    if verbose then ns.Print("Result:"); ChatTabDiag() end
 end
 
 -- =========================== Friends / guildmates ============================
