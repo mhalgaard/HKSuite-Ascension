@@ -70,22 +70,50 @@ end
 -- registered module. Because it iterates ns.modules, any new module that
 -- registers with a `key` and `title` shows up here automatically.
 function ns.BuildOverview()
+    local ROW_H     = 30      -- height of each module row
+    local LIST_W    = 470     -- width of the list container
+    local SHARED_X  = 348     -- x-offset of the Shared checkbox within a row
+
     local panel = CreateFrame("Frame")
     panel.name = "HKSuite"
     ns.overviewPanel = panel
 
+    local version = (GetAddOnMetadata and GetAddOnMetadata(ADDON, "Version")) or ns.version
+
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("HKSuite  |cff808080v" .. ns.version .. "|r")
+    title:SetText("HKSuite  |cff808080v" .. version .. "|r")
 
     local subtitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    subtitle:SetText("Enable/disable each module. |cffffd100Shared|r = account-wide settings; uncheck for this character's own settings.")
+    subtitle:SetText("Enable or disable each module. |cffffd100Shared|r = account-wide settings; uncheck for this character's own settings.")
 
-    -- Column header for the scope toggle.
-    local scopeHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    scopeHdr:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 300, -6)
-    scopeHdr:SetText("Shared")
+    -- Collect the modules we actually render (those with a key + title).
+    local mods = {}
+    for _, m in ipairs(ns.modules) do
+        if m.key and m.title then mods[#mods + 1] = m end
+    end
+
+    -- ---- Column headers -------------------------------------------------
+    local hdrModule = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hdrModule:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 8, -16)
+    hdrModule:SetText("|cffffd100Module|r")
+
+    local hdrShared = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    hdrShared:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", SHARED_X + 8, -16)
+    hdrShared:SetText("|cffffd100Shared|r")
+
+    -- ---- List container -------------------------------------------------
+    local list = CreateFrame("Frame", nil, panel)
+    list:SetPoint("TOPLEFT", hdrModule, "BOTTOMLEFT", -8, -6)
+    list:SetSize(LIST_W, #mods * ROW_H + 8)
+    list:SetBackdrop({
+        bgFile   = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 14, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    list:SetBackdropColor(0.05, 0.05, 0.05, 0.5)
+    list:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.9)
 
     local enableChecks, scopeChecks = {}, {}
     local function RefreshChecks()
@@ -93,37 +121,55 @@ function ns.BuildOverview()
         for key, cb in pairs(scopeChecks) do cb:SetChecked(ns.GetScope(key) == "account") end
     end
 
-    local anchor = subtitle
-    for _, module in ipairs(ns.modules) do
-        if module.key and module.title then
-            local key = module.key
-            local cb = ns.CreateCheck(panel, module.title, module.desc, ns.IsModuleEnabled(key))
-            cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, (anchor == subtitle) and -14 or -8)
-            cb:SetScript("OnClick", function(self)
-                ns.SetModuleEnabled(key, self:GetChecked() and true or false)
-            end)
-            enableChecks[key] = cb
+    local SCOPE_TIP = "Checked: this module uses shared account-wide settings.\nUnchecked: this character uses its own settings for this module (seeded from the account settings).\nApplies after a reload."
 
-            local sc = ns.CreateCheck(panel, "Shared",
-                "Checked: this module uses shared account-wide settings.\nUnchecked: this character uses its own settings for this module (seeded from the account settings).\nApplies after a reload.",
-                ns.GetScope(key) == "account")
-            sc:SetPoint("LEFT", cb, "LEFT", 300, 0)
-            sc:SetScript("OnClick", function(self)
-                ns.SetScope(key, self:GetChecked() and "account" or "character")
-                enableChecks[key]:SetChecked(ns.IsModuleEnabled(key))
-                ns.PromptReload()
-            end)
-            scopeChecks[key] = sc
+    for idx, module in ipairs(mods) do
+        local key = module.key
 
-            anchor = cb
-        end
+        local row = CreateFrame("Button", nil, list)
+        row:SetSize(LIST_W - 8, ROW_H)
+        row:SetPoint("TOPLEFT", list, "TOPLEFT", 4, -4 - (idx - 1) * ROW_H)
+
+        -- Alternating stripe for readability.
+        local bg = row:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetTexture("Interface\\Buttons\\WHITE8X8")
+        if idx % 2 == 0 then bg:SetVertexColor(1, 1, 1, 0.035) else bg:SetVertexColor(0, 0, 0, 0) end
+
+        -- Gold hover highlight.
+        row:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+        row:GetHighlightTexture():SetVertexColor(1, 0.82, 0, 0.10)
+
+        local cb = ns.CreateCheck(row, module.title, module.desc, ns.IsModuleEnabled(key))
+        cb:SetPoint("LEFT", row, "LEFT", 4, 0)
+        cb:SetScript("OnClick", function(self)
+            ns.SetModuleEnabled(key, self:GetChecked() and true or false)
+        end)
+        enableChecks[key] = cb
+
+        -- Scope toggle (no per-row label; the column header covers it).
+        local sc = ns.CreateCheck(row, "", SCOPE_TIP, ns.GetScope(key) == "account")
+        sc:SetPoint("LEFT", row, "LEFT", SHARED_X, 0)
+        sc:SetScript("OnClick", function(self)
+            ns.SetScope(key, self:GetChecked() and "account" or "character")
+            enableChecks[key]:SetChecked(ns.IsModuleEnabled(key))
+            ns.PromptReload()
+        end)
+        scopeChecks[key] = sc
+
+        -- Clicking anywhere on the row toggles the module enable.
+        row:SetScript("OnClick", function()
+            local newv = not cb:GetChecked()
+            cb:SetChecked(newv)
+            ns.SetModuleEnabled(key, newv and true or false)
+        end)
     end
 
-    -- Bulk scope buttons.
+    -- ---- Bulk scope buttons --------------------------------------------
     local allShared = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     allShared:SetSize(150, 22)
     allShared:SetText("All shared")
-    allShared:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -14)
+    allShared:SetPoint("TOPLEFT", list, "BOTTOMLEFT", 0, -14)
     allShared:SetScript("OnClick", function()
         for _, m in ipairs(ns.modules) do if m.key then ns.SetScope(m.key, "account") end end
         RefreshChecks()
@@ -140,9 +186,16 @@ function ns.BuildOverview()
         ns.PromptReload()
     end)
 
+    -- ---- Divider + UI Profiles -----------------------------------------
+    local divider = panel:CreateTexture(nil, "ARTWORK")
+    divider:SetTexture("Interface\\Buttons\\WHITE8X8")
+    divider:SetVertexColor(1, 1, 1, 0.12)
+    divider:SetSize(LIST_W, 1)
+    divider:SetPoint("TOPLEFT", allShared, "BOTTOMLEFT", 0, -16)
+
     local sep = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    sep:SetPoint("TOPLEFT", allShared, "BOTTOMLEFT", 0, -22)
-    sep:SetText("UI Profiles")
+    sep:SetPoint("TOPLEFT", divider, "BOTTOMLEFT", 0, -12)
+    sep:SetText("|cffffd100UI Profiles|r")
 
     local btn = CreateFrame("Button", "HKSuiteLoadProfilesButton", panel, "UIPanelButtonTemplate")
     btn:SetSize(230, 24)

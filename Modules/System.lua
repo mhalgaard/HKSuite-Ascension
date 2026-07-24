@@ -47,14 +47,29 @@ local function ApplyOption(key)
         SetCVar("weatherDensity", cfg.weatherZero and "0" or "3")
     elseif key == "fastLoot" then
         if cfg.fastLoot then SetCVar("autoLootDefault", "1") end
-    elseif key == "hideErrors" then
-        if cfg.hideErrors then
-            UIErrorsFrame:UnregisterEvent("UI_ERROR_MESSAGE")
-        else
-            UIErrorsFrame:RegisterEvent("UI_ERROR_MESSAGE")
-        end
     elseif key == "muteErrorSpeech" then
         SetCVar("Sound_EnableErrorSpeech", cfg.muteErrorSpeech and "0" or "1")
+    end
+    -- hideErrors needs no apply step: the AddMessage filter reads cfg live.
+end
+
+-- Suppress the red on-screen error text by filtering UIErrorsFrame's own
+-- AddMessage, rather than unregistering the event. This is immune to other
+-- addons (e.g. ElvUI) re-registering UI_ERROR_MESSAGE, and it preserves the
+-- yellow/green info messages (quest updates, reputation, etc.) since we only
+-- drop messages tinted with the red error color.
+local function InstallErrorFilter()
+    if ns._errorFilterInstalled then return end
+    ns._errorFilterInstalled = true
+    local orig = UIErrorsFrame.AddMessage
+    UIErrorsFrame.AddMessage = function(self, msg, r, g, b, ...)
+        if cfg and cfg.hideErrors and ns.IsModuleEnabled("system") then
+            local rr, gg, bb = r or 1, g or 1, b or 1
+            if rr > 0.9 and gg < 0.5 and bb < 0.5 then
+                return   -- red error text: drop it
+            end
+        end
+        return orig(self, msg, r, g, b, ...)
     end
 end
 
@@ -69,7 +84,6 @@ local function ApplyEnabled()
     end
     if cfg.weatherZero then SetCVar("weatherDensity", "0") end
     if cfg.fastLoot then SetCVar("autoLootDefault", "1") end
-    if cfg.hideErrors then UIErrorsFrame:UnregisterEvent("UI_ERROR_MESSAGE") end
     if cfg.muteErrorSpeech then SetCVar("Sound_EnableErrorSpeech", "0") end
     if type(cfg.cameraFactor) == "number" then
         SetCVar("cameraDistanceMaxFactor", cfg.cameraFactor)
@@ -221,6 +235,7 @@ function M:OnInit()
     cfg = ns.GetConfig("system")
     MigrateDelete()
     BuildOptionsPanel()
+    InstallErrorFilter()
 
     -- Instant loot + bind-on-pickup confirmation.
     local lootFrame = CreateFrame("Frame")

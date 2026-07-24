@@ -35,6 +35,7 @@ apply after a reload.
 | System | On | Screen/weather/loot tweaks, camera, error hiding, auto-dismount, item deletion |
 | Chat Filters | On *(filters off)* | Hide Ascension broadcast & channel spam |
 | Clear Quests | On | Abandon unwanted quests, keeping the ones you choose |
+| UI Features | On *(features off)* | In-range crosshair and a movable trinket cooldown tracker |
 | Addon Button | On | Consolidate minimap buttons into one HK flyout |
 | Auto-Grab Vanity | On | Collect & tidy up vanity-collection items |
 | Loot Auto Roller | Off | Auto-roll on group loot, by item quality |
@@ -139,6 +140,17 @@ Abandon unwanted quests in one click, keeping the ones you want:
 - Prestige and Mentorship quests are always kept.
 - **Clear quests now** button (asks for confirmation and lists what it will
   abandon). The HK button's **Shift+CTRL+right-click** does it instantly.
+</details>
+
+<details>
+<summary><b>UI Features</b> <i>(both features off by default)</i></summary>
+
+| Option | Default | What it does |
+|---|---|---|
+| Enable in-range tracker | Off | Shows a crosshair over your character — white when your target is in melee range, red when out of range. |
+| Enable trinket tracker | Off | Shows your equipped trinkets and their cooldowns in a box. Hold **Ctrl + left-drag** to move it. |
+
+Melee range is exact: it uses `IsSpellInRange` with a real 5-yard melee ability. Since Ascension is classless, the tracker auto-detects a melee ability you know from a built-in list — or you can type a specific ability name in the module options. If no melee ability is found it falls back to a coarse ~9.9 yd distance check.
 </details>
 
 <details>
