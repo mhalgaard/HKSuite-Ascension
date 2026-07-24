@@ -49,7 +49,14 @@ local function BuildCross()
     vbar:SetPoint("CENTER")
 
     crossFrame.bars = { hbar, vbar }
-    crossFrame:Hide()
+
+    -- The frame must stay shown or its OnUpdate never fires; we toggle the bars.
+    local function ShowBars(show)
+        for _, bar in ipairs(crossFrame.bars) do
+            if show then bar:Show() else bar:Hide() end
+        end
+    end
+    ShowBars(false)
 
     crossFrame:SetScript("OnUpdate", function(self, e)
         self.elapsed = (self.elapsed or 0) + e
@@ -57,17 +64,17 @@ local function BuildCross()
         self.elapsed = 0
 
         if not (enabled() and cfg.rangeTracker) then
-            self:Hide()
+            ShowBars(false)
             return
         end
         -- Only meaningful with a live, attackable target.
         if not UnitExists("target") or UnitIsDead("target")
             or not UnitCanAttack("player", "target") then
-            self:Hide()
+            ShowBars(false)
             return
         end
 
-        self:Show()
+        ShowBars(true)
         local c = CheckInteractDistance("target", 3) and WHITE or RED
         for _, bar in ipairs(self.bars) do
             bar:SetVertexColor(c[1], c[2], c[3])
