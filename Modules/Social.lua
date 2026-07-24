@@ -170,11 +170,36 @@ end
 -- Create the enabled tabs if they don't already exist. Idempotent, so it's safe
 -- to run on every login: existing tabs (stored per-character by Blizzard) are
 -- left alone; a fresh character with the option enabled gets them made.
+-- Re-dock and show a chat frame that exists but was closed/undocked (e.g. after
+-- an ElvUI profile reset wipes the chat layout). pcall'd so an ElvUI dock hook
+-- erroring can't break the rest.
+local function ShowChatFrame(frame)
+    if not frame or frame:IsShown() then return end
+    local docked = frame.isDocked
+        or (DOCKED_CHAT_FRAMES and tContains(DOCKED_CHAT_FRAMES, frame))
+    if not docked and FCF_DockFrame and DOCKED_CHAT_FRAMES then
+        pcall(FCF_DockFrame, frame, (#DOCKED_CHAT_FRAMES + 1), false)
+    end
+    if FCF_SetLocked then pcall(FCF_SetLocked, frame, 1) end
+    frame:Show()
+    local tab = _G[frame:GetName() .. "Tab"]
+    if tab then tab:Show() end
+    if FCF_DockUpdate then pcall(FCF_DockUpdate) end
+end
+
+-- Ensure a single tab exists and is visible: create it if missing, or re-open it
+-- if it exists but is hidden. Does NOT reconfigure existing tabs (that would wipe
+-- any manual tweaks); the "refresh" button does the reconfigure.
+local function EnsureOneTab(name, createFn)
+    local f = FindChatTab(name)
+    if not f then createFn() else ShowChatFrame(f) end
+end
+
 local function EnsureTabs()
     if not ns.IsModuleEnabled("social") then return end
-    if cfg.enableGuildTab and not FindChatTab("Guild") then CreateGuildTab() end
-    if cfg.enableWorldTab and not FindChatTab("World") then CreateWorldTab() end
-    if cfg.enableLootTab and not FindChatTab("Loot") then CreateLootTab() end
+    if cfg.enableGuildTab then EnsureOneTab("Guild", CreateGuildTab) end
+    if cfg.enableWorldTab then EnsureOneTab("World", CreateWorldTab) end
+    if cfg.enableLootTab then EnsureOneTab("Loot", CreateLootTab) end
 end
 
 -- Reconfigure an existing World/Loot frame's message groups + channels.
@@ -220,17 +245,17 @@ local function RefreshTabs(verbose)
 
     if cfg.enableGuildTab then
         local f = FindChatTab("Guild")
-        if f then ConfigureGuildFrame(f); if verbose then ns.Print("Refreshed existing \"Guild\" tab.") end
+        if f then ConfigureGuildFrame(f); ShowChatFrame(f); if verbose then ns.Print("Refreshed & opened \"Guild\" tab.") end
         else CreateGuildTab() end
     end
     if cfg.enableWorldTab then
         local f = FindChatTab("World")
-        if f then ConfigureWorldFrame(f); if verbose then ns.Print("Refreshed existing \"World\" tab.") end
+        if f then ConfigureWorldFrame(f); ShowChatFrame(f); if verbose then ns.Print("Refreshed & opened \"World\" tab.") end
         else CreateWorldTab() end
     end
     if cfg.enableLootTab then
         local f = FindChatTab("Loot")
-        if f then ConfigureLootFrame(f); if verbose then ns.Print("Refreshed existing \"Loot\" tab.") end
+        if f then ConfigureLootFrame(f); ShowChatFrame(f); if verbose then ns.Print("Refreshed & opened \"Loot\" tab.") end
         else CreateLootTab() end
     end
 end
