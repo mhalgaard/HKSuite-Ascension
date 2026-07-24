@@ -102,11 +102,22 @@ end
 
 -- Hide the group-loot window for a rollID. The default UI hides it inside the
 -- roll buttons' OnClick; since we call RollOnLoot directly we must hide it too.
+-- Replacements like ElvUI use their own bars (not GroupLootFrame1..4) but still
+-- tag the frame with `.rollID`, so we also sweep all frames for a match.
 local function CloseRollFrame(rollID)
+    -- Default Blizzard group-loot frames.
     for i = 1, (NUM_GROUP_LOOT_FRAMES or 4) do
         local f = _G["GroupLootFrame" .. i]
-        if f and f.rollID == rollID then
-            f:Hide()
+        if f and f.rollID == rollID then f:Hide() end
+    end
+    -- Any other addon's roll frame (e.g. ElvUI's loot bars) tracking this rollID.
+    if EnumerateFrames then
+        local f = EnumerateFrames()
+        while f do
+            if f.rollID == rollID and f.IsShown and f:IsShown() then
+                pcall(f.Hide, f)
+            end
+            f = EnumerateFrames(f)
         end
     end
 end
