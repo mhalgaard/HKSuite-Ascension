@@ -273,24 +273,61 @@ local function BuildOptionsPanel()
     spellLabel:SetText("Melee ability for range check (optional — auto-detected if blank):")
 
     local spellBox = CreateFrame("EditBox", "HKSuiteRangeSpellBox", panel, "InputBoxTemplate")
-    spellBox:SetSize(220, 20)
+    spellBox:SetSize(200, 20)
     spellBox:SetAutoFocus(false)
-    spellBox:SetPoint("TOPLEFT", spellLabel, "BOTTOMLEFT", 4, -6)
+    spellBox:SetPoint("TOPLEFT", spellLabel, "BOTTOMLEFT", 4, -8)
     spellBox:SetText(cfg.rangeSpell or "")
-    local function SaveSpell(self)
-        cfg.rangeSpell = (self:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        cachedSpell = nil   -- force re-resolve with the new preference
+
+    local savedLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    local function RefreshSaved()
+        local v = cfg.rangeSpell
+        if v and v ~= "" then
+            savedLabel:SetText("Saved: |cff00ff00" .. v .. "|r")
+        else
+            savedLabel:SetText("Saved: |cffaaaaaa(auto-detect)|r")
+        end
     end
-    spellBox:SetScript("OnEnterPressed", function(self) SaveSpell(self); self:ClearFocus() end)
+
+    local function SaveSpell()
+        cfg.rangeSpell = (spellBox:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        cachedSpell = nil            -- force re-resolve with the new preference
+        spellBox:SetText(cfg.rangeSpell)
+        RefreshSaved()
+    end
+
+    spellBox:SetScript("OnEnterPressed", function(self) SaveSpell(); self:ClearFocus() end)
     spellBox:SetScript("OnEditFocusLost", SaveSpell)
     spellBox:SetScript("OnEscapePressed", function(self)
         self:SetText(cfg.rangeSpell or ""); self:ClearFocus()
     end)
 
+    local okBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    okBtn:SetSize(48, 22)
+    okBtn:SetPoint("LEFT", spellBox, "RIGHT", 8, 0)
+    okBtn:SetText("OK")
+    okBtn:SetScript("OnClick", function() SaveSpell(); spellBox:ClearFocus() end)
+
+    savedLabel:SetPoint("TOPLEFT", spellBox, "BOTTOMLEFT", 0, -6)
+    RefreshSaved()
+
+    -- Shift-click a spell from the spellbook into the box while it has focus.
+    hooksecurefunc("ChatEdit_InsertLink", function(link)
+        if link and spellBox:HasFocus() then
+            local name = tostring(link):match("%[(.-)%]") or tostring(link)
+            spellBox:SetText(name)
+            SaveSpell()
+            return true
+        end
+    end)
+
+    local tipShift = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    tipShift:SetPoint("TOPLEFT", savedLabel, "BOTTOMLEFT", 0, -4)
+    tipShift:SetText("Tip: click in the box, then Shift-click an ability in your spellbook to fill it.")
+
     local trinket = ns.CreateCheck(panel, "Enable trinket tracker",
         "Shows your equipped trinkets and their cooldowns in a box. Hold Ctrl and left-drag to move it.",
         cfg.trinketTracker)
-    trinket:SetPoint("TOPLEFT", spellBox, "BOTTOMLEFT", -28, -14)
+    trinket:SetPoint("TOPLEFT", tipShift, "BOTTOMLEFT", -28, -14)
     trinket:SetScript("OnClick", function(self)
         cfg.trinketTracker = self:GetChecked() and true or false
         UpdateTrinkets()

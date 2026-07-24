@@ -181,10 +181,21 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         end)
 
         -- Build the Overview page first so module option panels can nest under it.
-        if ns.BuildOverview then ns.BuildOverview() end
+        if ns.BuildOverview then
+            local ok, err = pcall(ns.BuildOverview)
+            if not ok then ns.Print("|cffff2020Overview error:|r " .. tostring(err)) end
+        end
 
+        -- Initialize each module independently: a failure in one must not stop
+        -- the rest from loading (and we name the culprit so it can be fixed).
         for _, module in ipairs(ns.modules) do
-            if module.OnInit then module:OnInit() end
+            if module.OnInit then
+                local ok, err = pcall(module.OnInit, module)
+                if not ok then
+                    ns.Print("|cffff2020Error initializing " ..
+                        (module.title or module.key or "?") .. ":|r " .. tostring(err))
+                end
+            end
         end
 
         self:UnregisterEvent("ADDON_LOADED")

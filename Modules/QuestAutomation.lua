@@ -14,6 +14,7 @@ ns.defaults.quest = {
     autoSkipGossip   = false,  -- auto-select a lone gossip option to skip the talk menu
     skipDailies      = false,  -- don't auto-accept daily quests
     autoAcceptCallboard = false, -- auto-accept callboard / command board quests
+    autoShareQuests  = false,  -- share quests with the party automatically when accepted
     bypassModifier   = "SHIFT", -- hold this to temporarily disable: SHIFT / CTRL / ALT / NONE
 }
 
@@ -89,6 +90,17 @@ function handlers.QUEST_ACCEPT_CONFIRM()
     if cfg.autoAccept and not BypassHeld() then
         ConfirmAcceptQuest()
     end
+end
+
+-- Fired when a quest is added to the log; arg1 is its quest-log index.
+function handlers.QUEST_ACCEPTED(questIndex)
+    if not cfg.autoShareQuests or BypassHeld() then return end
+    if not questIndex or GetNumPartyMembers() == 0 then return end
+    SelectQuestLogEntry(questIndex)
+    -- GetQuestLogPushable() reflects the selected quest; skip un-shareable ones
+    -- so we don't spew "that quest can't be shared" errors.
+    if GetQuestLogPushable and not GetQuestLogPushable() then return end
+    QuestLogPushQuest()
 end
 
 function handlers.QUEST_PROGRESS()
@@ -239,8 +251,16 @@ local function BuildOptionsPanel()
         cfg.autoAcceptCallboard = self:GetChecked() and true or false
     end)
 
+    local share = ns.CreateCheck(panel, "Auto-share quests with your party",
+        "When you accept a quest, automatically share it with your party (only quests that can be shared).",
+        cfg.autoShareQuests)
+    share:SetPoint("TOPLEFT", callboard, "BOTTOMLEFT", 0, -8)
+    share:SetScript("OnClick", function(self)
+        cfg.autoShareQuests = self:GetChecked() and true or false
+    end)
+
     local bypassLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    bypassLabel:SetPoint("TOPLEFT", callboard, "BOTTOMLEFT", 0, -18)
+    bypassLabel:SetPoint("TOPLEFT", share, "BOTTOMLEFT", 0, -18)
     bypassLabel:SetText("Hold key to pause automation:")
 
     local dropdown = CreateFrame("Frame", "HKSuiteBypassDropdown", panel, "UIDropDownMenuTemplate")

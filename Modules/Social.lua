@@ -333,12 +333,36 @@ local function BuildOptionsPanel()
     kw:SetPoint("LEFT", kwLabel, "RIGHT", 12, 0)
     kw:SetAutoFocus(false)
     kw:SetText(cfg.autoInvKeyword or "inv")
-    kw:SetScript("OnEnterPressed", function(self) cfg.autoInvKeyword = self:GetText() self:ClearFocus() end)
-    kw:SetScript("OnEscapePressed", function(self) self:SetText(cfg.autoInvKeyword or "inv") self:ClearFocus() end)
+
+    local kwSaved = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    local function RefreshKwSaved()
+        kwSaved:SetText("Saved: |cff00ff00" .. (cfg.autoInvKeyword or "inv") .. "|r")
+    end
+
+    local function SaveKeyword()
+        local v = (kw:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if v == "" then v = "inv" end
+        cfg.autoInvKeyword = v
+        kw:SetText(v)
+        RefreshKwSaved()
+    end
+
+    kw:SetScript("OnEnterPressed", function(self) SaveKeyword(); self:ClearFocus() end)
+    kw:SetScript("OnEditFocusLost", SaveKeyword)
+    kw:SetScript("OnEscapePressed", function(self) self:SetText(cfg.autoInvKeyword or "inv"); self:ClearFocus() end)
+
+    local kwOk = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    kwOk:SetSize(48, 22)
+    kwOk:SetPoint("LEFT", kw, "RIGHT", 8, 0)
+    kwOk:SetText("OK")
+    kwOk:SetScript("OnClick", function() SaveKeyword(); kw:ClearFocus() end)
+
+    kwSaved:SetPoint("TOPLEFT", kwLabel, "BOTTOMLEFT", 0, -6)
+    RefreshKwSaved()
 
     local fo = ns.CreateCheck(panel, "Only from friends & guildmates",
         "Restrict whisper-invites so only friends and guildmates can be auto-invited.", cfg.autoInvFriendsOnly)
-    fo:SetPoint("TOPLEFT", kwLabel, "BOTTOMLEFT", -20, -8)
+    fo:SetPoint("TOPLEFT", kwSaved, "BOTTOMLEFT", -20, -8)
     fo:SetScript("OnClick", function(self) cfg.autoInvFriendsOnly = self:GetChecked() and true or false end)
 
     -- Grey the whisper sub-options while whisper-invite is off (still clickable).
