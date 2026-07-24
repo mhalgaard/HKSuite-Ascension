@@ -147,10 +147,10 @@ Abandon unwanted quests in one click, keeping the ones you want:
 
 | Option | Default | What it does |
 |---|---|---|
-| Enable in-range tracker | Off | Shows a crosshair over your character — white when your target is in (approximate) melee range, red when out of range. |
+| Enable in-range tracker | Off | Shows a crosshair over your character — white when your target is in melee range, red when out of range. |
 | Enable trinket tracker | Off | Shows your equipped trinkets and their cooldowns in a box. Hold **Ctrl + left-drag** to move it. |
 
-Melee range uses the tightest generic distance check available on 3.3.5 (~9.9 yd interaction distance), so it's a close visual approximation rather than an exact 5-yard check.
+Melee range is exact: it uses `IsSpellInRange` with a real 5-yard melee ability. Since Ascension is classless, the tracker auto-detects a melee ability you know from a built-in list — or you can type a specific ability name in the module options. If no melee ability is found it falls back to a coarse ~9.9 yd distance check.
 </details>
 
 <details>

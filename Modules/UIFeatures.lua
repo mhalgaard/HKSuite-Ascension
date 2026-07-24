@@ -3,7 +3,7 @@ local ADDON, ns = ...
 -- =============================================================================
 -- UI Features module: small on-screen combat helpers.
 --   * In-range tracker  — a crosshair over the character, white when the target
---     is in (approximate) melee range, red when it's out of range.
+--     is in melee range, red when it's out of range.
 --   * Trinket tracker   — a movable box showing your equipped trinkets and their
 --     cooldowns (move with Ctrl + left-drag).
 -- =============================================================================
@@ -16,6 +16,7 @@ local M = ns.RegisterModule({
 
 ns.defaults.uifeatures = {
     rangeTracker   = false,
+    rangeSpell     = "",       -- optional: exact ability name to range-check with
     trinketTracker = false,
     trinketPos     = { "CENTER", "CENTER", 0, -160 },  -- point, relPoint, x, y
 }
@@ -25,9 +26,60 @@ local cfg  -- filled in OnInit
 local function enabled() return ns.IsModuleEnabled("uifeatures") end
 
 -- ------------------------------------------------------------ in-range tracker
--- 3.3.5 has no exact melee-range API, so we use the tightest generic distance
--- check available: CheckInteractDistance index 3 (~9.9 yards), which tracks
--- melee reach closely enough for a visual cue.
+-- There's no direct "is target in melee range" API, but IsSpellInRange() is
+-- exact for a given ability. Ascension is classless, so instead of assuming a
+-- class spell we probe a list of real 5-yard melee abilities and use whichever
+-- one the player actually knows (the player can also name their own). We only
+-- fall back to the loose CheckInteractDistance (~9.9 yd) if none are found.
+local MELEE_SPELLS = {
+    -- Rogue
+    "Sinister Strike", "Backstab", "Mutilate", "Hemorrhage", "Ghostly Strike", "Gouge", "Eviscerate",
+    -- Warrior
+    "Rend", "Hamstring", "Mortal Strike", "Bloodthirst", "Overpower", "Revenge",
+    "Devastate", "Sunder Armor", "Heroic Strike", "Shield Slam", "Concussion Blow", "Pummel",
+    -- Paladin
+    "Crusader Strike", "Hammer of the Righteous",
+    -- Death Knight
+    "Plague Strike", "Blood Strike", "Death Strike", "Obliterate", "Scourge Strike",
+    "Frost Strike", "Heart Strike", "Rune Strike",
+    -- Hunter (melee)
+    "Raptor Strike", "Wing Clip", "Mongoose Bite",
+    -- Shaman
+    "Stormstrike", "Lava Lash",
+    -- Druid
+    "Maul", "Mangle (Bear)", "Mangle (Cat)", "Shred", "Claw", "Rake", "Ferocious Bite", "Ravage",
+}
+
+local cachedSpell   -- last melee ability that resolved as known
+
+-- IsSpellInRange returns 1 (in range), 0 (out of range), or nil (unknown spell /
+-- invalid target). With a valid hostile target, a known melee spell returns 0/1,
+-- so a non-nil result reliably means "the player has this ability".
+local function ResolveMeleeSpell()
+    local custom = cfg.rangeSpell
+    if custom and custom ~= "" and IsSpellInRange(custom, "target") ~= nil then
+        return custom
+    end
+    if cachedSpell and IsSpellInRange(cachedSpell, "target") ~= nil then
+        return cachedSpell
+    end
+    for _, name in ipairs(MELEE_SPELLS) do
+        if IsSpellInRange(name, "target") ~= nil then
+            cachedSpell = name
+            return name
+        end
+    end
+    return nil
+end
+
+local function TargetInMeleeRange()
+    local spell = ResolveMeleeSpell()
+    if spell then
+        return IsSpellInRange(spell, "target") == 1
+    end
+    return CheckInteractDistance("target", 3) and true or false
+end
+
 local WHITE = { 1, 1, 1 }
 local RED   = { 1, 0.15, 0.15 }
 
@@ -75,7 +127,7 @@ local function BuildCross()
         end
 
         ShowBars(true)
-        local c = CheckInteractDistance("target", 3) and WHITE or RED
+        local c = TargetInMeleeRange() and WHITE or RED
         for _, bar in ipairs(self.bars) do
             bar:SetVertexColor(c[1], c[2], c[3])
         end
@@ -209,17 +261,36 @@ local function BuildOptionsPanel()
     title:SetText("UI Features")
 
     local range = ns.CreateCheck(panel, "Enable in-range tracker",
-        "Shows a crosshair over your character: white when your target is in (approximate) melee range, red when out of range.",
+        "Shows a crosshair over your character: white when your target is in melee range, red when out of range.",
         cfg.rangeTracker)
     range:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
     range:SetScript("OnClick", function(self)
         cfg.rangeTracker = self:GetChecked() and true or false
     end)
 
+    local spellLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    spellLabel:SetPoint("TOPLEFT", range, "BOTTOMLEFT", 24, -6)
+    spellLabel:SetText("Melee ability for range check (optional — auto-detected if blank):")
+
+    local spellBox = CreateFrame("EditBox", "HKSuiteRangeSpellBox", panel, "InputBoxTemplate")
+    spellBox:SetSize(220, 20)
+    spellBox:SetAutoFocus(false)
+    spellBox:SetPoint("TOPLEFT", spellLabel, "BOTTOMLEFT", 4, -6)
+    spellBox:SetText(cfg.rangeSpell or "")
+    local function SaveSpell(self)
+        cfg.rangeSpell = (self:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        cachedSpell = nil   -- force re-resolve with the new preference
+    end
+    spellBox:SetScript("OnEnterPressed", function(self) SaveSpell(self); self:ClearFocus() end)
+    spellBox:SetScript("OnEditFocusLost", SaveSpell)
+    spellBox:SetScript("OnEscapePressed", function(self)
+        self:SetText(cfg.rangeSpell or ""); self:ClearFocus()
+    end)
+
     local trinket = ns.CreateCheck(panel, "Enable trinket tracker",
         "Shows your equipped trinkets and their cooldowns in a box. Hold Ctrl and left-drag to move it.",
         cfg.trinketTracker)
-    trinket:SetPoint("TOPLEFT", range, "BOTTOMLEFT", 0, -8)
+    trinket:SetPoint("TOPLEFT", spellBox, "BOTTOMLEFT", -28, -14)
     trinket:SetScript("OnClick", function(self)
         cfg.trinketTracker = self:GetChecked() and true or false
         UpdateTrinkets()
