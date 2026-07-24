@@ -30,9 +30,9 @@ apply after a reload.
 | Module | Default | Summary |
 |---|---|---|
 | Quest Automation | On | Auto accept / turn in / reward pick / gossip skip; daily & callboard toggles |
-| Item Deletion | On | Auto-fills the DELETE prompt; optional instant delete |
+| Automation | On *(actions off)* | Auto-release after death (BG/world/dungeon) and auto-sell junk at vendors |
 | Social | On | Class colors, chat tabs, World channel, group-invite automation |
-| System | On | Screen effects, weather, fast loot, BoP confirm, camera distance |
+| System | On | Screen/weather/loot tweaks, camera, error hiding, auto-dismount, item deletion |
 | Chat Filters | On *(filters off)* | Hide Ascension broadcast & channel spam |
 | Clear Quests | On | Abandon unwanted quests, keeping the ones you choose |
 | Addon Button | On | Consolidate minimap buttons into one HK flyout |
@@ -56,12 +56,24 @@ A **bypass key** (default: Shift) pauses all quest automation while held.
 </details>
 
 <details>
-<summary><b>Item Deletion</b></summary>
+<summary><b>Automation</b></summary>
+
+**Auto release spirit** (waits briefly, and skips releasing if a resurrection is being offered or a soulstone is available):
 
 | Option | Default | What it does |
 |---|---|---|
-| Auto-fill "DELETE" in deletion prompts | **On** | Pre-fills the required `DELETE` word, so it's one click to confirm. |
-| Instant delete (skip the confirmation) | Off | Deletes immediately with no dialog. Use with care — deletions are unrecoverable. |
+| Auto release after death | Off | Master switch for auto-releasing your spirit. |
+| └ In battlegrounds | On | Release automatically while in a battleground. |
+| └ In the open world | On | Release automatically when you die out in the world. |
+| └ In dungeons / raids | Off | Release in 5-mans/raids. Off by default so you can wait for a battle-res. |
+
+**Auto sell at vendors** (only items with a vendor value are ever sold):
+
+| Option | Default | What it does |
+|---|---|---|
+| Auto sell items when visiting a vendor | Off | On merchant open, sells the qualities selected below plus anything whitelisted. |
+| └ Poor / Common / Uncommon / Rare / Epic | Poor + Common on | Per-quality sell toggles. |
+| Always-sell whitelist | — | Item names or IDs (one per line) to always sell, regardless of quality. |
 </details>
 
 <details>
@@ -85,9 +97,15 @@ A **bypass key** (default: Shift) pauses all quest automation while held.
 | Disable screen glow | Off | Turns off the full-screen glow. |
 | Disable screen effects | Off | Turns off the death / nether-world effects. |
 | Set weather density to 0 | Off | Removes rain, snow and weather. |
+| Camera distance | — | Slider from minimum to maximum zoom. |
 | Enable fast auto loot | Off | Instantly loots corpses and objects. |
 | Auto-confirm Bind-on-Pickup loot | Off | Confirms the BoP loot prompt for you, any quality. |
-| Camera distance | — | Slider from minimum to maximum zoom. |
+| Hide on-screen error messages | Off | Hides the red error text in the middle of the screen. |
+| Disable error sounds (cooldown / GCD) | Off | Silences the spoken error sounds when an ability isn't ready. |
+| Dismount when using an action | Off | Dismounts when you cast a spell or use an item while mounted (never while flying). |
+| Dismount at flight masters | Off | Dismounts when you open a flight master's map. |
+| Auto-fill "DELETE" in deletion prompts | **On** | Pre-fills the required `DELETE` word, so it's one click to confirm. |
+| Instant delete (skip the confirmation) | Off | Deletes immediately with no dialog. Use with care — deletions are unrecoverable. |
 </details>
 
 <details>

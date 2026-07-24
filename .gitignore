@@ -10,3 +10,19 @@ desktop.ini
 
 # WoW / addon backups
 *.bak
+
+# Live game data — never commit (personal / machine-specific)
+HKSuiteDB.lua
+HKSuiteCharDB.lua
+SavedVariables/
+WTF/
+*.wtf
+Logs/
+*.log
+Screenshots/
+*.tga
+
+# Secrets
+*.env
+.env
+*.token

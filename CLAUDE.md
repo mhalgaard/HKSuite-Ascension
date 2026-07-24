@@ -117,6 +117,23 @@ After copying, the game must reload to pick up Lua changes: `/reload` in-game, o
 log out to character select and back in. New/removed files require a full client
 restart.
 
+## Rule: never commit or push personal info
+The repo is public. Before staging, committing, or pushing, make sure no personal
+or machine-specific data goes in. This includes:
+
+- **Absolute local paths** — `C:\Users\<name>\...`, `c:\Projects\...`,
+  `C:\Ascension\...`, or any drive-letter path. Keep them out of committed files
+  (docs like this one are the exception; source/config must not hardcode them).
+- **Real-world identity** — personal email addresses, full names, account names,
+  Discord/Battle.net handles, machine/host names.
+- **Live game data** — never commit `HKSuiteDB` / `HKSuiteCharDB` SavedVariables,
+  WTF/account folders, screenshots, logs, or anything copied out of the client.
+- **Secrets** — tokens, API keys, GitHub credentials.
+
+`.gitignore` is the first line of defense — verify anything sensitive is listed
+there. Before every push, sanity-check `git status` / `git diff --staged` and stop
+if personal info appears. When in doubt, leave it out and ask.
+
 ## Conventions
 - UI text uses `ns.CreateCheck` for checkboxes so styling stays consistent.
 - Colored addon-name prefix for chat output via `ns.Print`.
