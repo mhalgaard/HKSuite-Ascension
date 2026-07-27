@@ -74,7 +74,10 @@ A **bypass key** (default: Shift) pauses all quest automation while held.
 |---|---|---|
 | Auto sell items when visiting a vendor | Off | On merchant open, sells the qualities selected below plus anything whitelisted. |
 | └ Poor / Common / Uncommon / Rare / Epic | Poor + Common on | Per-quality sell toggles. |
-| Always-sell whitelist | — | Item names or IDs (one per line) to always sell, regardless of quality. |
+| └ Never sell trade goods / crafting materials | **On** | Protects ore, herbs, cloth, leather, enchanting mats and other Trade Goods / reagents from the quality rules. |
+| └ Never sell gemstones | **On** | Protects gems and pearls (Star Ruby, Small Lustrous Pearl, cut and uncut gems), matched by item class. |
+| └ Never sell elixirs from level *N* | **On**, level 30 | Protects elixirs requiring at least level *N*, so low-level leftovers still sell. Flasks and potions aren't covered. |
+| Always-sell whitelist | — | Item names or IDs (one per line) to always sell, regardless of quality — this overrides every protection above. |
 </details>
 
 <details>

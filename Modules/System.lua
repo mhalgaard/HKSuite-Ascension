@@ -109,10 +109,15 @@ local function FindPopup(which)
     end
 end
 
-local function OnDeletePopup(which)
+local function OnDeletePopup(which, frame)
     if not ns.IsModuleEnabled("system") then return end
 
-    local frame, i = FindPopup(which)
+    local i
+    if frame then
+        i = tonumber((frame:GetName() or ""):match("(%d+)$"))
+    else
+        frame, i = FindPopup(which)
+    end
     if not frame then return end
 
     if cfg.deleteInstant then
@@ -123,6 +128,24 @@ local function OnDeletePopup(which)
         local editBox = frame.editBox or _G["StaticPopup" .. i .. "EditBox"]
         if editBox then
             editBox:SetText(CONFIRM)   -- fires OnTextChanged, enabling the confirm button
+        end
+    end
+end
+
+-- Handle the dialog from its own OnShow, which runs while the frame is being
+-- shown -- so the box is filled (or the dialog dismissed) before it is ever
+-- drawn. A StaticPopup_Show hook runs a frame later instead, and that shows up
+-- as the dialog visibly flickering on every deletion.
+local function InstallDeleteHandlers()
+    for _, which in ipairs({ "DELETE_GOOD_ITEM", "DELETE_ITEM" }) do
+        local dialog = StaticPopupDialogs[which]
+        if dialog and not dialog.hkSuiteWrapped then
+            dialog.hkSuiteWrapped = true
+            local orig = dialog.OnShow
+            dialog.OnShow = function(self, ...)
+                if orig then orig(self, ...) end
+                OnDeletePopup(which, self)
+            end
         end
     end
 end
@@ -279,7 +302,10 @@ function M:OnInit()
         if _G[fn] then hooksecurefunc(fn, DismountIfMounted) end
     end
 
-    -- Item deletion: fill/skip the delete confirmation.
+    -- Item deletion: fill/skip the delete confirmation. The OnShow wrapper does
+    -- the work; the hook only covers a dialog re-shown while already visible,
+    -- where OnShow doesn't fire again.
+    InstallDeleteHandlers()
     hooksecurefunc("StaticPopup_Show", function(which)
         if which == "DELETE_GOOD_ITEM" or which == "DELETE_ITEM" then
             OnDeletePopup(which)
