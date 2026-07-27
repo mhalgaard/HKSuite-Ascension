@@ -197,6 +197,11 @@ local function BuildOptionsPanel()
     wlEdit:SetScript("OnEditFocusLost", function(self) saveWhitelist(self:GetText()) end)
     wlScroll:SetScrollChild(wlEdit)
 
+    -- The check in the box's corner commits without clicking away from it first.
+    ns.CreateInlineAccept(wlEdit, function()
+        saveWhitelist(wlEdit:GetText())
+    end, wlScroll, "TOPRIGHT", -6, -6)
+
     local appendBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     appendBtn:SetSize(180, 22)
     appendBtn:SetText("Add current quests")

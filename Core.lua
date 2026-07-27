@@ -119,6 +119,55 @@ function ns.CreateCheck(parent, label, tooltip, checked)
     return cb
 end
 
+-- An accept button that lives *inside* an input instead of beside it: a small
+-- checkmark set into the box's edge, the way Blizzard's own inline inputs read.
+-- Clicking it runs `onAccept` and drops focus, so a value commits without having
+-- to click away from the box first.
+--
+-- Single-line boxes get the check in their right edge, and their text inset is
+-- widened so typing never runs underneath it. Multi-line boxes live inside a
+-- scroll frame, so they pass that frame as `host` and the check lands in its
+-- top-right corner instead.
+function ns.CreateInlineAccept(editBox, onAccept, host, point, xOff, yOff)
+    local inline = (host == nil)
+    host = host or editBox
+    point = point or "RIGHT"
+
+    local btn = CreateFrame("Button", nil, host)
+    btn:SetSize(16, 16)
+    btn:SetPoint(point, host, point, xOff or (inline and -4 or -6), yOff or 0)
+    btn:SetFrameLevel(host:GetFrameLevel() + 4)
+
+    btn:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    btn:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+    btn:GetHighlightTexture():SetBlendMode("ADD")
+    btn:GetNormalTexture():SetAlpha(0.7)      -- quiet until pointed at
+
+    btn:SetScript("OnEnter", function(self)
+        self:GetNormalTexture():SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Save", nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self:GetNormalTexture():SetAlpha(0.7)
+        GameTooltip:Hide()
+    end)
+    btn:SetScript("OnClick", function()
+        if onAccept then onAccept() end
+        editBox:ClearFocus()
+    end)
+
+    -- Keep the text clear of the check on single-line boxes.
+    if inline and editBox.GetTextInsets and editBox.SetTextInsets then
+        local l, r, t, b = editBox:GetTextInsets()
+        editBox:SetTextInsets(l or 0, math.max(r or 0, 22), t or 0, b or 0)
+    end
+
+    return btn
+end
+
 -- Reload prompt shown after scope changes.
 StaticPopupDialogs["HKSUITE_RELOAD"] = {
     text = "HKSuite: reload the UI to apply the settings scope change?",

@@ -268,6 +268,17 @@ local function BuildOptionsPanel()
     wlEdit:SetScript("OnEditFocusLost", function(self) SaveWhitelist(self:GetText()) end)
     wlScroll:SetScrollChild(wlEdit)
 
+    -- The check in the box's corner commits without clicking away from it first.
+    local wlSaved = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+
+    ns.CreateInlineAccept(wlEdit, function()
+        SaveWhitelist(wlEdit:GetText())
+        wlSaved:SetText("Saved: |cff00ff00" .. #cfg.whitelist .. "|r entr" .. (#cfg.whitelist == 1 and "y" or "ies"))
+    end, wlScroll, "TOPRIGHT", -6, -6)
+
+    wlSaved:SetPoint("TOPLEFT", wlScroll, "BOTTOMLEFT", 0, -8)
+    wlSaved:SetText("Saved: |cff00ff00" .. #cfg.whitelist .. "|r entr" .. (#cfg.whitelist == 1 and "y" or "ies"))
+
     InterfaceOptions_AddCategory(panel)
 end
 

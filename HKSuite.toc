@@ -9,6 +9,7 @@
 Core.lua
 Overview.lua
 Modules\QuestAutomation.lua
+Modules\Rolling.lua
 Modules\Automation.lua
 Modules\Social.lua
 Modules\System.lua

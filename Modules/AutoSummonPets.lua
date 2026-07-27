@@ -255,8 +255,17 @@ local function BuildOptionsPanel()
     eb:SetPoint("LEFT", ebLabel, "RIGHT", 12, 0)
     eb:SetAutoFocus(false)
     eb:SetText(cfg.safeZonePet or "")
-    eb:SetScript("OnEnterPressed", function(self) cfg.safeZonePet = self:GetText() self:ClearFocus() end)
+
+    local function SaveSafeZonePet()
+        cfg.safeZonePet = (eb:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        eb:SetText(cfg.safeZonePet)
+    end
+
+    eb:SetScript("OnEnterPressed", function(self) SaveSafeZonePet(); self:ClearFocus() end)
+    eb:SetScript("OnEditFocusLost", SaveSafeZonePet)
     eb:SetScript("OnEscapePressed", function(self) self:SetText(cfg.safeZonePet or "") self:ClearFocus() end)
+
+    ns.CreateInlineAccept(eb, SaveSafeZonePet)
 
     -- Explain the summon priority so it's clear what gets summoned when.
     local logicHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")

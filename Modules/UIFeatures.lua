@@ -138,7 +138,7 @@ end
 -- ------------------------------------------------------------ trinket tracker
 local SLOTS = { 13, 14 }   -- INVSLOT_TRINKET1 / INVSLOT_TRINKET2
 local ICON = 36
-local PAD, GAP = 4, 4
+local PAD, GAP = 4, 1
 
 local trinketBox, icons
 
@@ -186,7 +186,7 @@ local function BuildTrinketBox()
     trinketBox:SetSize(width, PAD * 2 + ICON)
     local p = cfg.trinketPos
     trinketBox:SetPoint(p[1] or "CENTER", UIParent, p[2] or "CENTER", p[3] or 0, p[4] or -160)
-    trinketBox:SetFrameStrata("MEDIUM")
+    trinketBox:SetFrameStrata("BACKGROUND")
     trinketBox:SetClampedToScreen(true)
     trinketBox:SetMovable(true)
     trinketBox:EnableMouse(true)
