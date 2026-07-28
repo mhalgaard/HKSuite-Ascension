@@ -49,9 +49,16 @@ apply after a reload.
 | Auto-accept quests | **On** | Accepts offered quests automatically (incl. shared/escort confirmations). |
 | Auto turn in quests | Off | Hands in completed quests. Waits for you on reward-choice quests unless the sub-option below is on. |
 | └ Auto-select most valuable reward | Off | On reward-choice quests, picks the highest vendor-value reward. Enabling it also enables Auto turn in. |
+| Also open quests already in your log | Off | Lowest priority — once hand-ins and new quests are done, opens a quest you're already on. |
 | Auto-skip single gossip option | Off | When an NPC has one gossip option and no quests to handle, selects it to skip the talk menu. |
 | Don't auto-accept daily quests | Off | Skips auto-accepting quests flagged as daily. |
 | Auto-accept callboard / command board quests | Off | Callboard/command board quests are not auto-accepted unless this is on. |
+| Auto-share quests with your party | Off | Shares each accepted quest with your group (only quests that can be shared). |
+| └ Party only — never share in a raid | **On** | Suppresses auto-sharing while you're in a raid group. |
+
+Quest givers are handled in priority order — **completed hand-in → available quest →
+quest already in your log** — one thing per interaction, so multi-quest NPCs drain a
+step at a time.
 
 A **bypass key** (default: Shift) pauses all quest automation while held.
 </details>

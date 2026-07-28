@@ -15,6 +15,8 @@ ns.defaults.quest = {
     skipDailies      = false,  -- don't auto-accept daily quests
     autoAcceptCallboard = false, -- auto-accept callboard / command board quests
     autoShareQuests  = false,  -- share quests with the party automatically when accepted
+    shareOnlyInParty = true,   -- ...but never while in a raid
+    autoOpenInProgress = false, -- lowest priority: open quests already in your log
     bypassModifier   = "SHIFT", -- hold this to temporarily disable: SHIFT / CTRL / ALT / NONE
 }
 
@@ -66,6 +68,53 @@ local function BestReward()
     return best
 end
 
+-- Is the quest with this title flagged complete in our quest log? The greeting
+-- frame gives us no completion info at all, and the gossip flag's position moves
+-- between builds, so the log is our source of truth.
+-- Collapsed headers hide their quests from GetQuestLogTitle, so on a miss expand
+-- everything and look once more before giving up.
+local function LogQuestComplete(title, retried)
+    if not title then return false end
+    local sawCollapsed = false
+    for i = 1, GetNumQuestLogEntries() do
+        local t, _, _, _, isHeader, isCollapsed, isComplete = GetQuestLogTitle(i)
+        if isHeader then
+            if isCollapsed then sawCollapsed = true end
+        elseif t == title then
+            return isComplete == 1   -- 1 = complete, -1 = failed, nil = in progress
+        end
+    end
+    if sawCollapsed and not retried then
+        ExpandQuestHeader(0)         -- 0 = all headers
+        return LogQuestComplete(title, true)
+    end
+    return false
+end
+
+-- Normalise GetGossipActiveQuests() into { index, title, complete } records.
+-- It returns a flat run of fields per quest and the field count varies by build,
+-- so derive it with select("#") (trailing nils make #{...} unreliable) and take
+-- isComplete from the last field of each record, OR'd with the quest log.
+local function GossipActiveQuests()
+    local num = GetNumGossipActiveQuests()
+    if num == 0 then return {} end
+    local count = select("#", GetGossipActiveQuests())
+    local data = { GetGossipActiveQuests() }
+    local fields = math.floor(count / num)
+    local out = {}
+    for i = 1, num do
+        local base = (i - 1) * fields
+        local title = data[base + 1]
+        local complete = data[base + fields] and true or false
+        out[i] = {
+            index    = i,
+            title    = title,
+            complete = complete or LogQuestComplete(title),
+        }
+    end
+    return out
+end
+
 local handlers = {}
 
 -- Guard against accepting the same quest twice in quick succession. Some NPCs
@@ -95,7 +144,12 @@ end
 -- Fired when a quest is added to the log; arg1 is its quest-log index.
 function handlers.QUEST_ACCEPTED(questIndex)
     if not cfg.autoShareQuests or BypassHeld() then return end
-    if not questIndex or GetNumPartyMembers() == 0 then return end
+    if not questIndex then return end
+    -- GetNumRaidMembers() is the unambiguous raid test: 0 outside a raid, and it
+    -- doesn't depend on what GetNumPartyMembers() reports for your subgroup.
+    local inRaid = GetNumRaidMembers() > 0
+    if not inRaid and GetNumPartyMembers() == 0 then return end
+    if inRaid and cfg.shareOnlyInParty then return end
     SelectQuestLogEntry(questIndex)
     -- GetQuestLogPushable() reflects the selected quest; skip un-shareable ones
     -- so we don't spew "that quest can't be shared" errors.
@@ -123,48 +177,97 @@ function handlers.QUEST_COMPLETE()
     end
 end
 
-function handlers.QUEST_GREETING()
-    if BypassHeld() then return end
-    if ShouldDeliver() then
-        for i = 1, GetNumActiveQuests() do
-            SelectActiveQuest(i)
-        end
-    end
-    if cfg.autoAccept and not (IsCallboard() and not cfg.autoAcceptCallboard) then
-        for i = 1, GetNumAvailableQuests() do
-            SelectAvailableQuest(i)
-        end
-    end
+-- May we take new quests from whoever we're talking to right now?
+local function CanAcceptHere()
+    return cfg.autoAccept and not (IsCallboard() and not cfg.autoAcceptCallboard)
 end
 
-function handlers.GOSSIP_SHOW()
+-- Both quest-giver frames pick exactly ONE thing per showing, in this order:
+--   1. hand in a completed quest
+--   2. accept an available quest
+--   3. open a quest that's already in the log but unfinished (opt-in)
+-- The first Select* call swaps the frame out from under us, so anything after it
+-- would be acting on a stale menu. The NPC re-shows its list once we're done with
+-- that quest, which re-fires the event and drains the next item on the next pass.
+
+-- Classic quest-list frame (no gossip menu).
+function handlers.QUEST_GREETING()
     if BypassHeld() then return end
-    if cfg.autoAccept and not (IsCallboard() and not cfg.autoAcceptCallboard) then
-        for i = 1, GetNumGossipAvailableQuests() do
-            SelectGossipAvailableQuest(i)
-        end
-    end
+
     if ShouldDeliver() then
-        local num = GetNumGossipActiveQuests()
-        if num > 0 then
-            local data = { GetGossipActiveQuests() }
-            local fields = #data / num          -- field count varies by build
-            for i = 1, num do
-                local isComplete = data[(i - 1) * fields + 4]  -- isComplete is 4th
-                if isComplete then
-                    SelectGossipActiveQuest(i)
-                    break
-                end
+        for i = 1, GetNumActiveQuests() do
+            if LogQuestComplete(GetActiveTitle(i)) then
+                SelectActiveQuest(i)
+                return
             end
         end
     end
-    -- Skip the talk menu when the NPC has no quests to handle and exactly one
+
+    if CanAcceptHere() and GetNumAvailableQuests() > 0 then
+        SelectAvailableQuest(1)
+        return
+    end
+
+    if cfg.autoOpenInProgress and GetNumActiveQuests() > 0 then
+        SelectActiveQuest(1)
+    end
+end
+
+-- Debounce: GOSSIP_SHOW and QUEST_FINISHED can land in the same frame for one
+-- menu, and acting twice would select against a stale list. GetTime() is frame
+-- granular, so this only swallows same-frame duplicates, not a genuine re-show.
+local lastGossipTime = 0
+
+local function HandleGossip()
+    if BypassHeld() then return end
+    local now = GetTime()
+    if (now - lastGossipTime) < 0.05 then return end
+    lastGossipTime = now
+
+    local active = GossipActiveQuests()
+
+    if ShouldDeliver() then
+        for _, q in ipairs(active) do
+            if q.complete then
+                SelectGossipActiveQuest(q.index)
+                return
+            end
+        end
+    end
+
+    if CanAcceptHere() and GetNumGossipAvailableQuests() > 0 then
+        SelectGossipAvailableQuest(1)
+        return
+    end
+
+    if cfg.autoOpenInProgress then
+        for _, q in ipairs(active) do
+            if not q.complete then
+                SelectGossipActiveQuest(q.index)
+                return
+            end
+        end
+    end
+
+    -- Nothing quest-related left: skip the talk menu when the NPC has exactly one
     -- gossip option, so we go straight to it (vendor, flight master, etc.).
     if cfg.autoSkipGossip
         and GetNumGossipAvailableQuests() == 0
         and GetNumGossipActiveQuests() == 0
         and GetNumGossipOptions() == 1 then
         SelectGossipOption(1)
+    end
+end
+
+function handlers.GOSSIP_SHOW()
+    HandleGossip()
+end
+
+-- Finished with one quest. If the NPC left its gossip menu up instead of re-firing
+-- GOSSIP_SHOW, run the priority pass again so the rest of its list still drains.
+function handlers.QUEST_FINISHED()
+    if GossipFrame and GossipFrame:IsShown() then
+        HandleGossip()
     end
 end
 
@@ -227,10 +330,18 @@ local function BuildOptionsPanel()
 
     RefreshChild()
 
+    local inProgress = ns.CreateCheck(panel, "Also open quests already in your log",
+        "Lowest priority. After completed hand-ins and new quests are dealt with, open a quest you're already on (shows its progress text). Leave off if quest givers double as vendors.",
+        cfg.autoOpenInProgress)
+    inProgress:SetPoint("TOPLEFT", reward, "BOTTOMLEFT", -20, -8)  -- back to base indent
+    inProgress:SetScript("OnClick", function(self)
+        cfg.autoOpenInProgress = self:GetChecked() and true or false
+    end)
+
     local skipGossip = ns.CreateCheck(panel, "Auto-skip single gossip option",
         "When an NPC greets you with just one gossip option and no quests to handle, select it automatically to skip the talk menu.",
         cfg.autoSkipGossip)
-    skipGossip:SetPoint("TOPLEFT", reward, "BOTTOMLEFT", -20, -8)  -- back to base indent
+    skipGossip:SetPoint("TOPLEFT", inProgress, "BOTTOMLEFT", 0, -8)
     skipGossip:SetScript("OnClick", function(self)
         cfg.autoSkipGossip = self:GetChecked() and true or false
     end)
@@ -255,12 +366,30 @@ local function BuildOptionsPanel()
         "When you accept a quest, automatically share it with your party (only quests that can be shared).",
         cfg.autoShareQuests)
     share:SetPoint("TOPLEFT", callboard, "BOTTOMLEFT", 0, -8)
+
+    local partyOnly = ns.CreateCheck(panel, "Party only — never share in a raid",
+        "Only auto-share while in a normal party. In a raid group, quests are never shared automatically.",
+        cfg.shareOnlyInParty)
+    partyOnly:SetPoint("TOPLEFT", share, "BOTTOMLEFT", 20, -2)
+
+    local function RefreshShareChild()
+        local on = cfg.autoShareQuests
+        partyOnly.label:SetTextColor(on and 1 or 0.5, on and 1 or 0.5, on and 1 or 0.5)
+    end
+
     share:SetScript("OnClick", function(self)
         cfg.autoShareQuests = self:GetChecked() and true or false
+        RefreshShareChild()
     end)
 
+    partyOnly:SetScript("OnClick", function(self)
+        cfg.shareOnlyInParty = self:GetChecked() and true or false
+    end)
+
+    RefreshShareChild()
+
     local bypassLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    bypassLabel:SetPoint("TOPLEFT", share, "BOTTOMLEFT", 0, -18)
+    bypassLabel:SetPoint("TOPLEFT", partyOnly, "BOTTOMLEFT", -20, -18)
     bypassLabel:SetText("Hold key to pause automation:")
 
     local dropdown = CreateFrame("Frame", "HKSuiteBypassDropdown", panel, "UIDropDownMenuTemplate")
