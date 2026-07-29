@@ -8,6 +8,9 @@ local M = ns.RegisterModule({
     key   = "social",
     title = "Social",
     desc  = "Class colors, chat tabs, World channel, and group-invite automation.",
+    -- Chat tabs are only built on entering the world, so switching the module on
+    -- mid-session does nothing visible until a reload.
+    reloadOnToggle = true,
 })
 
 ns.defaults.social = {
@@ -231,19 +234,6 @@ local function ConfigureLootFrame(frame)
     if ChatFrame_RemoveAllChannels then ChatFrame_RemoveAllChannels(frame) end
 end
 
--- Print current chat-window state so tab problems are diagnosable in-game.
-local function ChatTabDiag()
-    ns.Print("Chat diagnostic — ElvUI: " .. (ElvUI and "loaded" or "not loaded")
-        .. ", windows: " .. NUM_CHAT_WINDOWS)
-    for i = 1, NUM_CHAT_WINDOWS do
-        local name, _, _, _, _, _, shown, _, docked = GetChatWindowInfo(i)
-        if name and name ~= "" then
-            ns.Print(("  [%d] \"%s\"  shown=%s docked=%s")
-                :format(i, name, tostring(shown), tostring(docked)))
-        end
-    end
-end
-
 -- User-driven: create the enabled tabs, or reconfigure them if they already
 -- exist. Verbose so the result is always visible in chat.
 local function RefreshTabs(verbose)
@@ -251,7 +241,6 @@ local function RefreshTabs(verbose)
         if verbose then ns.Print("Social module is disabled.") end
         return
     end
-    if verbose then ChatTabDiag() end
 
     if not (cfg.enableGuildTab or cfg.enableWorldTab or cfg.enableLootTab) then
         if verbose then ns.Print("No chat tabs are enabled above — tick one first.") end
@@ -273,8 +262,6 @@ local function RefreshTabs(verbose)
         if f then ConfigureLootFrame(f); ShowChatFrame(f); if verbose then ns.Print("Refreshed & opened \"Loot\" tab.") end
         else CreateLootTab() end
     end
-
-    if verbose then ns.Print("Result:"); ChatTabDiag() end
 end
 
 -- =========================== Friends / guildmates ============================
@@ -325,170 +312,114 @@ end
 
 -- ============================== Options page =================================
 
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Social"
-    panel.parent = "HKSuite"
+function M:BuildSettings(page)
+    page:Header("Chat")
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Social")
+    page:Check({
+        label = "Always use class colors in all channels",
+        tooltip = "Color player names by class in every chat channel.",
+        get = function() return cfg.classColors end,
+        set = function(v) cfg.classColors = v end,
+        onChange = function(on) if on then ApplyClassColors() end end,
+    })
 
-    -- ------------------------------------------------------------- Chat section
-    local chatHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    chatHdr:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
-    chatHdr:SetText("|cffffd100Chat|r")
+    page:Check({
+        label = "Auto-join the World channel on login",
+        tooltip = "Joins the \"World\" global chat channel automatically when you log in.",
+        get = function() return cfg.autoJoinWorld end,
+        set = function(v) cfg.autoJoinWorld = v end,
+        onChange = function(on)
+            if on and GetChannelName("World") == 0 then JoinPermanentChannel("World") end
+        end,
+    })
 
-    local cc = ns.CreateCheck(panel, "Always use class colors in all channels",
-        "Color player names by class in every chat channel.", cfg.classColors)
-    cc:SetPoint("TOPLEFT", chatHdr, "BOTTOMLEFT", 0, -6)
-    cc:SetScript("OnClick", function(self)
-        cfg.classColors = self:GetChecked() and true or false
-        if cfg.classColors then ApplyClassColors() end
-    end)
+    page:Header("Chat tabs")
 
-    local jw = ns.CreateCheck(panel, "Auto-join the World channel on login",
-        "Joins the \"World\" global chat channel automatically when you log in.", cfg.autoJoinWorld)
-    jw:SetPoint("TOPLEFT", cc, "BOTTOMLEFT", 0, -8)
-    jw:SetScript("OnClick", function(self)
-        cfg.autoJoinWorld = self:GetChecked() and true or false
-        if cfg.autoJoinWorld and GetChannelName("World") == 0 then
-            JoinPermanentChannel("World")
-        end
-    end)
+    local guildTab = page:Check({
+        label = "Enable Guild chat tab",
+        tooltip = "Creates a \"Guild\" tab if it doesn't exist: all chat messages plus XP, honor, rep, skill-ups, loot, money, system, errors and ignored.",
+        get = function() return cfg.enableGuildTab end,
+        set = function(v) cfg.enableGuildTab = v end,
+        onChange = function(on) if on and not FindChatTab("Guild") then CreateGuildTab() end end,
+    })
+    guildTab:BindChildren({
+        page:Check({
+            label = "Only show guild chat & whispers", indent = true,
+            tooltip = "When on, the Guild tab shows only guild/officer chat and whispers. When off, it shows the full set. Applies to an existing Guild tab immediately.",
+            get = function() return cfg.guildTabOnlyGuild end,
+            set = function(v) cfg.guildTabOnlyGuild = v end,
+            onChange = function()
+                local existing = FindChatTab("Guild")
+                if existing then ConfigureGuildFrame(existing) end   -- reconfigure live
+            end,
+        }),
+    })
 
-    local gt = ns.CreateCheck(panel, "Enable Guild chat tab",
-        "Creates a \"Guild\" tab if it doesn't exist: all chat messages plus XP, honor, rep, skill-ups, loot, money, system, errors and ignored.",
-        cfg.enableGuildTab)
-    gt:SetPoint("TOPLEFT", jw, "BOTTOMLEFT", 0, -8)
-    gt:SetScript("OnClick", function(self)
-        cfg.enableGuildTab = self:GetChecked() and true or false
-        if cfg.enableGuildTab and not FindChatTab("Guild") then CreateGuildTab() end
-    end)
+    page:Check({
+        label = "Enable World chat tab",
+        tooltip = "Creates a \"World\" tab if it doesn't exist: the Ascension, World, LookingForGroup and Trade channels plus whispers only.",
+        get = function() return cfg.enableWorldTab end,
+        set = function(v) cfg.enableWorldTab = v end,
+        onChange = function(on) if on and not FindChatTab("World") then CreateWorldTab() end end,
+    })
 
-    local go = ns.CreateCheck(panel, "Only show guild chat & whispers",
-        "When on, the Guild tab shows only guild/officer chat and whispers. When off, it shows the full set. Applies to an existing Guild tab immediately.",
-        cfg.guildTabOnlyGuild)
-    go:SetPoint("TOPLEFT", gt, "BOTTOMLEFT", 20, -2)
-    go:SetScript("OnClick", function(self)
-        cfg.guildTabOnlyGuild = self:GetChecked() and true or false
-        local existing = FindChatTab("Guild")
-        if existing then ConfigureGuildFrame(existing) end   -- reconfigure live
-    end)
+    page:Check({
+        label = "Enable Loot chat tab",
+        tooltip = "Creates a \"Loot\" tab if it doesn't exist: item loot, money, rolls (system) and whispers only.",
+        get = function() return cfg.enableLootTab end,
+        set = function(v) cfg.enableLootTab = v end,
+        onChange = function(on) if on and not FindChatTab("Loot") then CreateLootTab() end end,
+    })
 
-    local wt = ns.CreateCheck(panel, "Enable World chat tab",
-        "Creates a \"World\" tab if it doesn't exist: the Ascension, World, LookingForGroup and Trade channels plus whispers only.",
-        cfg.enableWorldTab)
-    wt:SetPoint("TOPLEFT", go, "BOTTOMLEFT", -20, -8)
-    wt:SetScript("OnClick", function(self)
-        cfg.enableWorldTab = self:GetChecked() and true or false
-        if cfg.enableWorldTab and not FindChatTab("World") then CreateWorldTab() end
-    end)
+    page:Button({
+        text = "Create / refresh chat tabs now", width = 240,
+        onClick = function() RefreshTabs(true) end,
+    })
 
-    local lt = ns.CreateCheck(panel, "Enable Loot chat tab",
-        "Creates a \"Loot\" tab if it doesn't exist: item loot, money, rolls (system) and whispers only.",
-        cfg.enableLootTab)
-    lt:SetPoint("TOPLEFT", wt, "BOTTOMLEFT", 0, -8)
-    lt:SetScript("OnClick", function(self)
-        cfg.enableLootTab = self:GetChecked() and true or false
-        if cfg.enableLootTab and not FindChatTab("Loot") then CreateLootTab() end
-    end)
+    page:Spacer(6)
+    page:Slider({
+        name = "HKSuiteChatFontSlider",
+        label = "Chat font size (all tabs)", min = 8, max = 24, step = 1, width = 240,
+        get = function() return cfg.fontSize or 12 end,
+        set = function(v) cfg.fontSize = v end,
+        onChange = ApplyChatFontSize,
+    })
 
-    local tabBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    tabBtn:SetSize(220, 22)
-    tabBtn:SetText("Create / refresh chat tabs now")
-    tabBtn:SetPoint("TOPLEFT", lt, "BOTTOMLEFT", 4, -8)
-    tabBtn:SetScript("OnClick", function() RefreshTabs(true) end)
+    page:Header("Group invites")
 
-    local fontSlider = CreateFrame("Slider", "HKSuiteChatFontSlider", panel, "OptionsSliderTemplate")
-    fontSlider:SetPoint("TOPLEFT", tabBtn, "BOTTOMLEFT", 0, -26)
-    fontSlider:SetMinMaxValues(8, 24)
-    fontSlider:SetValueStep(1)
-    fontSlider:SetWidth(200)
-    _G[fontSlider:GetName() .. "Low"]:SetText("8")
-    _G[fontSlider:GetName() .. "High"]:SetText("24")
-    fontSlider:SetValue(cfg.fontSize or 12)   -- set before wiring OnValueChanged
-    _G[fontSlider:GetName() .. "Text"]:SetText("Chat font size (all tabs): " .. (cfg.fontSize or 12))
-    fontSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        cfg.fontSize = value
-        _G[self:GetName() .. "Text"]:SetText("Chat font size (all tabs): " .. value)
-        ApplyChatFontSize(value)
-    end)
+    page:Check({
+        label = "Auto-accept group invites from friends & guildmates",
+        tooltip = "Automatically accept party invites from anyone on your friends list or in your guild.",
+        get = function() return cfg.autoAcceptGroup end,
+        set = function(v) cfg.autoAcceptGroup = v end,
+    })
 
-    -- ---------------------------------------------------- Group invites section
-    local invHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    invHdr:SetPoint("TOPLEFT", fontSlider, "BOTTOMLEFT", -4, -22)
-    invHdr:SetText("|cffffd100Group Invites|r")
+    local whisperInv = page:Check({
+        label = "Auto-invite players who whisper the keyword",
+        tooltip = "When someone whispers you the keyword below, automatically invite them to your group.",
+        get = function() return cfg.autoInvWhisper end,
+        set = function(v) cfg.autoInvWhisper = v end,
+    })
 
-    local ag = ns.CreateCheck(panel, "Auto-accept group invites from friends & guildmates",
-        "Automatically accept party invites from anyone on your friends list or in your guild.", cfg.autoAcceptGroup)
-    ag:SetPoint("TOPLEFT", invHdr, "BOTTOMLEFT", 0, -6)
-    ag:SetScript("OnClick", function(self) cfg.autoAcceptGroup = self:GetChecked() and true or false end)
+    page:Input({
+        label = "Keyword", indent = true, width = 140,
+        name = "HKSuiteInvKeyword", fallback = "inv",
+        get = function() return cfg.autoInvKeyword or "inv" end,
+        set = function(v) cfg.autoInvKeyword = (v ~= "" and v) or "inv" end,
+    })
 
-    local iw = ns.CreateCheck(panel, "Auto-invite players who whisper the keyword",
-        "When someone whispers you the keyword below, automatically invite them to your group.", cfg.autoInvWhisper)
-    iw:SetPoint("TOPLEFT", ag, "BOTTOMLEFT", 0, -8)
+    local friendsOnly = page:Check({
+        label = "Only from friends & guildmates", indent = true,
+        tooltip = "Restrict whisper-invites so only friends and guildmates can be auto-invited.",
+        get = function() return cfg.autoInvFriendsOnly end,
+        set = function(v) cfg.autoInvFriendsOnly = v end,
+    })
 
-    local kwLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    kwLabel:SetPoint("TOPLEFT", iw, "BOTTOMLEFT", 20, -10)
-    kwLabel:SetText("Keyword:")
-
-    local kw = CreateFrame("EditBox", "HKSuiteInvKeyword", panel, "InputBoxTemplate")
-    kw:SetSize(120, 20)
-    kw:SetPoint("LEFT", kwLabel, "RIGHT", 12, 0)
-    kw:SetAutoFocus(false)
-    kw:SetText(cfg.autoInvKeyword or "inv")
-
-    local kwSaved = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    local function RefreshKwSaved()
-        kwSaved:SetText("Saved: |cff00ff00" .. (cfg.autoInvKeyword or "inv") .. "|r")
-    end
-
-    local function SaveKeyword()
-        local v = (kw:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if v == "" then v = "inv" end
-        cfg.autoInvKeyword = v
-        kw:SetText(v)
-        RefreshKwSaved()
-    end
-
-    kw:SetScript("OnEnterPressed", function(self) SaveKeyword(); self:ClearFocus() end)
-    kw:SetScript("OnEditFocusLost", SaveKeyword)
-    kw:SetScript("OnEscapePressed", function(self) self:SetText(cfg.autoInvKeyword or "inv"); self:ClearFocus() end)
-
-    local kwOk = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    kwOk:SetSize(48, 22)
-    kwOk:SetPoint("LEFT", kw, "RIGHT", 8, 0)
-    kwOk:SetText("OK")
-    kwOk:SetScript("OnClick", function() SaveKeyword(); kw:ClearFocus() end)
-
-    kwSaved:SetPoint("TOPLEFT", kwLabel, "BOTTOMLEFT", 0, -6)
-    RefreshKwSaved()
-
-    local fo = ns.CreateCheck(panel, "Only from friends & guildmates",
-        "Restrict whisper-invites so only friends and guildmates can be auto-invited.", cfg.autoInvFriendsOnly)
-    fo:SetPoint("TOPLEFT", kwSaved, "BOTTOMLEFT", -20, -8)
-    fo:SetScript("OnClick", function(self) cfg.autoInvFriendsOnly = self:GetChecked() and true or false end)
-
-    -- Grey the whisper sub-options while whisper-invite is off (still clickable).
-    local function RefreshInv()
-        local c = cfg.autoInvWhisper and 1 or 0.5
-        kwLabel:SetTextColor(c, c, c)
-        fo.label:SetTextColor(c, c, c)
-    end
-    iw:SetScript("OnClick", function(self)
-        cfg.autoInvWhisper = self:GetChecked() and true or false
-        RefreshInv()
-    end)
-    RefreshInv()
-
-    InterfaceOptions_AddCategory(panel)
+    whisperInv:BindChildren({ friendsOnly })
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("social")
-    BuildOptionsPanel()
 
     if IsInGuild() then GuildRoster() end   -- request roster so guild checks work
     ShowFriends()                            -- request friends list

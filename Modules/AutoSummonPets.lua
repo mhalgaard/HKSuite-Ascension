@@ -117,10 +117,40 @@ local function canAttemptSummon()
     return true
 end
 
-local function buildPriorityList()
+local LOOTBOT = "Lootbot 3000"
+
+-- With the Loot-Transfigurator owned the Lootbot adds nothing, so it is replaced
+-- wherever a context asks for it -- the surrounding priority is untouched, the
+-- Lootbot's slot in it just goes to something else. Your safe-zone pet takes that
+-- slot if you have named one, otherwise Fix-o-Tron does.
+--
+-- This used to be `table.remove(list, 1)` on the open-world list, which was wrong
+-- twice over: it never applied in Manastorm, dungeons or raids, and while
+-- levelling position 1 is the Book of Ascension, so it dropped the Book and left
+-- the Lootbot in place.
+local function substituteLootbot(list)
+    if not (cfg.lootTrans and findPetIndex("Loot-Transfigurator")) then return list end
+
+    local replacement = cfg.safeZonePet
+    if not replacement or replacement == "" then replacement = "Fix-o-Tron" end
+
+    -- The replacement is often already further down the list, so de-duplicate as
+    -- we go and let it keep the earlier (Lootbot's) position.
+    local out, seen = {}, {}
+    for _, name in ipairs(list) do
+        local pick = (name == LOOTBOT) and replacement or name
+        if not seen[pick] then
+            seen[pick] = true
+            out[#out + 1] = pick
+        end
+    end
+    return out
+end
+
+local function contextPriorityList()
     -- Manastorm: Cogsley (ideally with the Eye buff) then Lootbot.
     if inManastorm() then
-        return { "Cogsley", "Lootbot 3000" }
+        return { "Cogsley", LOOTBOT }
     end
 
     local _, instanceType, difficultyIndex = GetInstanceInfo()
@@ -136,10 +166,10 @@ local function buildPriorityList()
                     table.insert(list, "Wondrous Wisdomball")
                 end
             end
-            table.insert(list, "Lootbot 3000")
+            table.insert(list, LOOTBOT)
             return list
         elseif instanceType == "raid" then
-            return { "Lootbot 3000" }
+            return { LOOTBOT }
         end
     end
 
@@ -155,16 +185,14 @@ local function buildPriorityList()
     -- prefers the Book; otherwise Lootbot leads.
     local maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 80
     local leveling = UnitLevel("player") < maxLevel and not lfgEverCompleted
-    local list
     if leveling then
-        list = { "Book of Ascension", "Lootbot 3000", "Treasure Keeper", "Fix-o-Tron" }
-    else
-        list = { "Lootbot 3000", "Book of Ascension", "Treasure Keeper", "Fix-o-Tron" }
+        return { "Book of Ascension", LOOTBOT, "Treasure Keeper", "Fix-o-Tron" }
     end
-    if cfg.lootTrans and findPetIndex("Loot-Transfigurator") then
-        table.remove(list, 1)   -- drop Lootbot if the Transfigurator is owned
-    end
-    return list
+    return { LOOTBOT, "Book of Ascension", "Treasure Keeper", "Fix-o-Tron" }
+end
+
+local function buildPriorityList()
+    return substituteLootbot(contextPriorityList())
 end
 
 -- Summon the highest-priority owned pet for the current context.
@@ -207,93 +235,69 @@ local function summonOnLogin()
 end
 
 -- ---------------------------------------------------------------- Options UI
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Auto Summon Pets"
-    panel.parent = "HKSuite"
+function M:BuildSettings(page)
+    page:Check({
+        label = "Summon while in combat",
+        tooltip = "Allow summoning premium pets during combat.",
+        get = function() return cfg.summonInCombat end,
+        set = function(v) cfg.summonInCombat = v end,
+    })
+    page:Check({
+        label = "Only summon after a zone change",
+        tooltip = "Avoids re-summoning until you move to a different zone.",
+        get = function() return cfg.noResummon end,
+        set = function(v) cfg.noResummon = v end,
+    })
+    page:Check({
+        label = "Skip Lootbot if Loot-Transfigurator is owned",
+        tooltip = "The Lootbot adds nothing once you own the Loot-Transfigurator, so its slot in "
+            .. "the priority goes to something else instead.\n\nEvery situation keeps its normal "
+            .. "priority; only the Lootbot is swapped out, for your safe-zone pet if you have "
+            .. "named one, otherwise Fix-o-Tron.",
+        get = function() return cfg.lootTrans end,
+        set = function(v) cfg.lootTrans = v end,
+    })
+    page:Hint("Only takes effect while you actually own the Loot-Transfigurator.")
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Auto Summon Pets")
+    page:Spacer(6)
+    page:Slider({
+        name = "HKSuitePetDelaySlider",
+        label = "Recast delay", min = 0, max = 600, step = 1, width = 240,
+        tooltip = "How long to wait before summoning again.",
+        format = function(v) return v .. "s" end,
+        get = function() return cfg.recastDelay or 8 end,
+        set = function(v) cfg.recastDelay = v end,
+    })
 
-    local combat = ns.CreateCheck(panel, "Summon while in combat",
-        "Allow summoning premium pets during combat.", cfg.summonInCombat)
-    combat:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    combat:SetScript("OnClick", function(self) cfg.summonInCombat = self:GetChecked() and true or false end)
+    page:Input({
+        label = "Safe-zone pet (name)",
+        name = "HKSuitePetSafeZone", width = 200,
+        tooltip = "Summoned instead of the usual priority while resting or AFK in a safe zone.\n\n"
+            .. "Also stands in for the Lootbot everywhere, if the option above is on.\n\n"
+            .. "Matched as a substring, so part of the name is enough.",
+        get = function() return cfg.safeZonePet or "" end,
+        set = function(v) cfg.safeZonePet = v end,
+    })
 
-    local noResum = ns.CreateCheck(panel, "Only summon after a zone change",
-        "Avoids re-summoning until you move to a different zone.", cfg.noResummon)
-    noResum:SetPoint("TOPLEFT", combat, "BOTTOMLEFT", 0, -8)
-    noResum:SetScript("OnClick", function(self) cfg.noResummon = self:GetChecked() and true or false end)
-
-    local lootT = ns.CreateCheck(panel, "Skip Lootbot if Loot-Transfigurator is owned",
-        "Removes Lootbot 3000 from the priority when you own the Loot-Transfigurator.", cfg.lootTrans)
-    lootT:SetPoint("TOPLEFT", noResum, "BOTTOMLEFT", 0, -8)
-    lootT:SetScript("OnClick", function(self) cfg.lootTrans = self:GetChecked() and true or false end)
-
-    local slider = CreateFrame("Slider", "HKSuitePetDelaySlider", panel, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", lootT, "BOTTOMLEFT", 4, -28)
-    slider:SetMinMaxValues(0, 600)
-    slider:SetValueStep(1)
-    slider:SetWidth(220)
-    _G[slider:GetName() .. "Low"]:SetText("0")
-    _G[slider:GetName() .. "High"]:SetText("600")
-    _G[slider:GetName() .. "Text"]:SetText("Recast delay: " .. (cfg.recastDelay or 8) .. "s")
-    slider:SetValue(cfg.recastDelay or 8)
-    slider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        cfg.recastDelay = value
-        _G[self:GetName() .. "Text"]:SetText("Recast delay: " .. value .. "s")
-    end)
-
-    local ebLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    ebLabel:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", -4, -24)
-    ebLabel:SetText("Safe-zone pet (name):")
-
-    local eb = CreateFrame("EditBox", "HKSuitePetSafeZone", panel, "InputBoxTemplate")
-    eb:SetSize(180, 20)
-    eb:SetPoint("LEFT", ebLabel, "RIGHT", 12, 0)
-    eb:SetAutoFocus(false)
-    eb:SetText(cfg.safeZonePet or "")
-
-    local function SaveSafeZonePet()
-        cfg.safeZonePet = (eb:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        eb:SetText(cfg.safeZonePet)
-    end
-
-    eb:SetScript("OnEnterPressed", function(self) SaveSafeZonePet(); self:ClearFocus() end)
-    eb:SetScript("OnEditFocusLost", SaveSafeZonePet)
-    eb:SetScript("OnEscapePressed", function(self) self:SetText(cfg.safeZonePet or "") self:ClearFocus() end)
-
-    ns.CreateInlineAccept(eb, SaveSafeZonePet)
-
-    -- Explain the summon priority so it's clear what gets summoned when.
-    local logicHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    logicHdr:SetPoint("TOPLEFT", ebLabel, "BOTTOMLEFT", 0, -20)
-    logicHdr:SetText("|cffffd100Summon priority by situation|r")
-
-    local logic = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    logic:SetPoint("TOPLEFT", logicHdr, "BOTTOMLEFT", 0, -8)
-    logic:SetWidth(520)
-    logic:SetJustifyH("LEFT")
-    logic:SetSpacing(2)
-    logic:SetText(
-        "|cffaaaaaaHighest available pet you own wins; PvP/arena summons nothing.|r\n" ..
+    -- Spell out the priority: which pet you get is otherwise hard to predict.
+    page:Header("Summon priority by situation")
+    page:Text("Highest available pet you own wins; PvP/arena summons nothing.")
+    page:Text(
         "• Manastorm:  Cogsley (Eye of the Manastorm)  >  Lootbot 3000\n" ..
         "• Dungeon (Normal):  Wisdomball (first 15s of the run or right after an LFG completion)  >  Lootbot 3000\n" ..
         "• Raid:  Lootbot 3000\n" ..
         "• Open world:  Lootbot 3000  >  Book of Ascension  >  Treasure Keeper  >  Fix-o-Tron\n" ..
         "• While leveling (before your first LFG completion):  Book of Ascension leads\n" ..
-        "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension\n" ..
-        "|cffaaaaaaWisdomball is only used in Normal dungeons, never Heroic/Mythic.|r"
+        "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension"
     )
-
-    InterfaceOptions_AddCategory(panel)
+    page:Text("With \"Skip Lootbot\" on and the Loot-Transfigurator owned, every Lootbot 3000 above "
+        .. "becomes your safe-zone pet (or Fix-o-Tron if you haven't named one). Nothing else about "
+        .. "the order changes.")
+    page:Hint("Wisdomball is only used in Normal dungeons, never Heroic/Mythic.")
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("pets")
-    BuildOptionsPanel()
 
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")

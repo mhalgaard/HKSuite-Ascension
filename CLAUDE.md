@@ -5,18 +5,30 @@ Lua + XML-free UI, using the retail-of-the-era WoW API.
 
 ## Architecture
 - `Core.lua` — suite framework: module registry, SavedVariables (`HKSuiteDB`),
-  defaults merging, per-module enable flags, shared UI helpers (`ns.CreateCheck`),
-  `/hk` slash command.
-- `Overview.lua` — the top-level **HKSuite** options page. Auto-lists every
-  registered module with an enable/disable checkbox.
-- `Modules/<Name>.lua` — one file per utility. Contains the behavior AND its own
-  settings sub-page.
+  defaults merging, per-module enable flags, `/hk` slash command.
+- `SettingsUI.lua` — HKSuite's standalone settings window plus `ns.UI`, the flat
+  widget set and page layout every module describes its settings with.
+- `Overview.lua` — the Overview tab's content, plus the one-button stub page in
+  Interface → AddOns that opens the real window.
+- `Modules/<Name>.lua` — one file per utility. Contains the behavior AND its
+  `M:BuildSettings(page)`.
 
-## Rule: every new module MUST be added to the Overview page
-The Overview is a **quick enable/disable area for all modules**. This happens
-automatically *as long as the module follows the registration convention* — the
-Overview iterates `ns.modules` and renders a toggle for anything with a `key`
-and `title`.
+## Settings live in HKSuite's own window, not Interface Options
+`SettingsUI.lua` owns the whole settings surface: a standalone window with a rail
+of modules down the left (each with its own on/off switch and a scope control)
+and the selected module's page on the right. Interface → AddOns keeps a single
+stub page whose only job is to open that window. `/hk` toggles it; `/hk <key>`
+jumps straight to a module.
+
+Modules **describe** their settings instead of positioning frames. `ns.UI` gives
+you `page:Header/Text/Hint/Divider/Spacer`, `page:Check/Input/TextArea/Dropdown/
+Slider/Button`, plus `page:Row` (side by side) and `page:Grid` (labelled dropdown
+grid). Never build a Blizzard options panel and never call
+`InterfaceOptions_AddCategory` from a module.
+
+## Rule: every new module MUST follow the registration convention
+A module appears in the rail automatically as long as it registers with a `key`
+and `title` — Core iterates `ns.modules`.
 
 When creating a new module:
 
@@ -25,29 +37,40 @@ When creating a new module:
    local ADDON, ns = ...
    local M = ns.RegisterModule({
        key   = "mymodule",                 -- unique; also its SavedVariables sub-table
-       title = "My Module",                -- shown on the Overview
-       desc  = "One-line description.",    -- Overview tooltip
+       title = "My Module",                -- shown in the rail and as the page title
+       desc  = "One-line description.",    -- shown under the page title
+       -- reloadOnToggle = true,           -- if flipping the switch needs a reload
    })
    ```
 2. Declare defaults under that key: `ns.defaults.mymodule = { enabled_thing = true }`.
 3. In `M:OnInit()`, read the config via **`ns.GetConfig("mymodule")`** (NOT
    `ns.config.mymodule` directly — the resolver returns the account or
    per-character table based on the module's scope). Register events, and
-   **guard all behavior** behind the module toggle so the Overview switch works:
+   **guard all behavior** behind the module toggle so the rail switch works:
    ```lua
    frame:SetScript("OnEvent", function(_, event, ...)
        if ns.IsModuleEnabled("mymodule") then handlers[event](...) end
    end)
    ```
-4. Give it a settings sub-page nested under the Overview:
+4. Describe its settings page. It is built lazily, the first time the module is
+   selected:
    ```lua
-   local panel = CreateFrame("Frame")
-   panel.name = "My Module"
-   panel.parent = "HKSuite"        -- nests it under the Overview page
-   -- ...build with ns.CreateCheck(...)
-   InterfaceOptions_AddCategory(panel)
+   function M:BuildSettings(page)
+       page:Header("Section")
+       page:Check({
+           label = "Do the thing", tooltip = "What it does.",
+           get = function() return cfg.thing end,
+           set = function(v) cfg.thing = v end,
+           onChange = ApplyThing,          -- optional
+       })
+   end
    ```
 5. Add the file to `HKSuite.toc` (after `Overview.lua`).
+
+If the switch can't take effect immediately (the module only wires things up at
+load), set `reloadOnToggle = true` so the window raises its reload banner, or
+implement `M:OnToggle(enabled)` to apply it live — `Modules/AddonButton.lua` does
+the latter, `Modules/Social.lua` the former.
 
 See `Modules/QuestAutomation.lua` as the reference implementation.
 
@@ -135,6 +158,6 @@ there. Before every push, sanity-check `git status` / `git diff --staged` and st
 if personal info appears. When in doubt, leave it out and ask.
 
 ## Conventions
-- UI text uses `ns.CreateCheck` for checkboxes so styling stays consistent.
+- Settings are built with `ns.UI` page methods so styling stays consistent.
 - Colored addon-name prefix for chat output via `ns.Print`.
 - Keep behavior modules self-contained: events + options panel in the one file.

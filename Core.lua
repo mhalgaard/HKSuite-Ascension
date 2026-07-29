@@ -27,12 +27,16 @@ end
 
 -- Register a module table. Recognised fields:
 --   key            (string) unique id, also the SavedVariables sub-table name
---   title          (string) display name shown on the Overview page
---   desc           (string) one-line description (tooltip on the Overview)
+--   title          (string) display name shown in the settings window
+--   desc           (string) one-line description (shown under the page title)
 --   defaultEnabled (bool)   default enabled state (true unless set to false)
 --   OnInit         (func)   called once after SavedVariables are ready
--- A module with a key automatically appears on the Overview with an
--- enable/disable toggle and an account/per-character scope toggle.
+--   BuildSettings  (func)   self, page -> describes the module's settings page
+--   OnToggle       (func)   self, enabled -> called when the rail switch flips
+--   reloadOnToggle (bool)   the switch only takes effect after a UI reload, so
+--                           the window raises its reload banner when it flips
+-- A module with a key automatically gets a row in the settings window's rail,
+-- with an enable/disable switch and an account/per-character scope control.
 function ns.RegisterModule(module)
     table.insert(ns.modules, module)
     return module
@@ -101,24 +105,10 @@ function ns.SetScope(key, scope)
 end
 
 -- ============================== UI helper ====================================
-local checkCount = 0
-function ns.CreateCheck(parent, label, tooltip, checked)
-    checkCount = checkCount + 1
-    local cb = CreateFrame("CheckButton", "HKSuiteCheck" .. checkCount, parent, "InterfaceOptionsCheckButtonTemplate")
-    cb.label = _G[cb:GetName() .. "Text"]
-    cb.label:SetText(label)
-    cb:SetChecked(checked)
-    if tooltip then
-        cb:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(tooltip, nil, nil, nil, nil, true)
-            GameTooltip:Show()
-        end)
-        cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    end
-    return cb
-end
-
+-- Checkboxes, dropdowns and the rest of the settings widgets live in ns.UI
+-- (SettingsUI.lua). What remains here is the one helper the widgets themselves
+-- build on.
+--
 -- An accept button that lives *inside* an input instead of beside it: a small
 -- checkmark set into the box's edge, the way Blizzard's own inline inputs read.
 -- Clicking it runs `onAccept` and drops focus, so a value commits without having
@@ -229,10 +219,10 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             return (a.title or "") < (b.title or "")
         end)
 
-        -- Build the Overview page first so module option panels can nest under it.
-        if ns.BuildOverview then
-            local ok, err = pcall(ns.BuildOverview)
-            if not ok then ns.Print("|cffff2020Overview error:|r " .. tostring(err)) end
+        -- A one-button page in Interface -> AddOns that opens the real window.
+        if ns.BuildOptionsStub then
+            local ok, err = pcall(ns.BuildOptionsStub)
+            if not ok then ns.Print("|cffff2020Options stub error:|r " .. tostring(err)) end
         end
 
         -- Initialize each module independently: a failure in one must not stop
@@ -251,12 +241,13 @@ frame:SetScript("OnEvent", function(self, event, arg1)
     end
 end)
 
--- Slash command opens the Overview page.
+-- Slash command opens HKSuite's own settings window. "/hk <module key>" jumps
+-- straight to that module's page.
 SLASH_HKSUITE1 = "/hk"
 SLASH_HKSUITE2 = "/hksuite"
-SlashCmdList["HKSUITE"] = function()
-    InterfaceOptionsFrame_OpenToCategory(ns.overviewPanel)
-    InterfaceOptionsFrame_OpenToCategory(ns.overviewPanel)  -- twice: WotLK quirk
+SlashCmdList["HKSUITE"] = function(msg)
+    local key = (msg or ""):match("^%s*(%S*)"):lower()
+    if key ~= "" then ns.OpenSettings(key) else ns.ToggleSettings() end
 end
 
 -- Convenience /rl to reload the UI, unless another addon already provides it.

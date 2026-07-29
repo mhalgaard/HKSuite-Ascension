@@ -59,84 +59,48 @@ local function Apply()
 end
 
 -- -------------------------------------------------------------------- options
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Rolling"
-    panel.parent = "HKSuite"
-
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Rolling")
-
-    local subtitle = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    subtitle:SetWidth(520)
-    subtitle:SetJustifyH("LEFT")
-    subtitle:SetText("Shortens the roll animation when rolling abilities and talents, by setting the client's "
+function M:BuildSettings(page)
+    page:Text("Shortens the roll animation when rolling abilities and talents, by setting the client's "
         .. GLOBAL .. " global. Turning it off restores the value the client had before HKSuite touched it.")
 
-    local quick = ns.CreateCheck(panel, "Enable quick rolling",
-        "Sets " .. GLOBAL .. " to the duration below, the same as running\n"
-        .. "|cffffd100/run setglobal(\"" .. GLOBAL .. "\", 0)|r\nafter every reload.",
-        cfg.quickRoll)
-    quick:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -16)
-
-    local durLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    durLabel:SetPoint("TOPLEFT", quick, "BOTTOMLEFT", 24, -8)
-    durLabel:SetText("Roll duration while quick rolling (seconds, 0 = instant):")
-
-    local durBox = CreateFrame("EditBox", "HKSuiteRollDurationBox", panel, "InputBoxTemplate")
-    durBox:SetSize(76, 20)   -- room for the digits plus the inline check
-    durBox:SetAutoFocus(false)
-    durBox:SetPoint("TOPLEFT", durLabel, "BOTTOMLEFT", 4, -8)
-    durBox:SetText(tostring(cfg.duration or 0))
-
-    local status = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    status:SetPoint("TOPLEFT", durBox, "BOTTOMLEFT", 0, -12)
-
-    local function RefreshStatus()
-        status:SetText("Value at load: " .. FormatValue(original)
-            .. "   |cff808080|||r   now: " .. FormatValue(_G[GLOBAL]))
+    local status
+    local function StatusText()
+        return "Value at load: " .. FormatValue(original)
+            .. "   |cff808080|||r   now: " .. FormatValue(_G[GLOBAL])
+    end
+    local function ApplyAndReport()
+        Apply()
+        if status then status:SetText(StatusText()) end
     end
 
-    local function SaveDuration()
-        local v = tonumber((durBox:GetText() or ""):match("[%d%.]+") or "") or 0
-        if v < 0 then v = 0 elseif v > 60 then v = 60 end
-        cfg.duration = v
-        durBox:SetText(tostring(v))
-        Apply()
-        RefreshStatus()
-    end
+    page:Check({
+        label = "Enable quick rolling",
+        tooltip = "Sets " .. GLOBAL .. " to the duration below, the same as running\n"
+            .. "|cffffd100/run setglobal(\"" .. GLOBAL .. "\", 0)|r\nafter every reload.",
+        get = function() return cfg.quickRoll end,
+        set = function(v) cfg.quickRoll = v end,
+        onChange = ApplyAndReport,
+    })
 
-    durBox:SetScript("OnEnterPressed", function(self) SaveDuration(); self:ClearFocus() end)
-    durBox:SetScript("OnEditFocusLost", SaveDuration)
-    durBox:SetScript("OnEscapePressed", function(self)
-        self:SetText(tostring(cfg.duration or 0)); self:ClearFocus()
-    end)
+    page:Input({
+        label = "Roll duration while quick rolling (seconds, 0 = instant)",
+        name = "HKSuiteRollDurationBox",
+        width = 90, numeric = true, min = 0, max = 60,
+        get = function() return cfg.duration or 0 end,
+        set = function(v) cfg.duration = v end,
+        onChange = ApplyAndReport,
+    })
 
-    ns.CreateInlineAccept(durBox, SaveDuration)
-
-    quick:SetScript("OnClick", function(self)
-        cfg.quickRoll = self:GetChecked() and true or false
-        Apply()
-        RefreshStatus()
-    end)
-
-    panel:SetScript("OnShow", function()
-        quick:SetChecked(cfg.quickRoll)
-        durBox:SetText(tostring(cfg.duration or 0))
-        RefreshStatus()
-    end)
-
-    RefreshStatus()
-    InterfaceOptions_AddCategory(panel)
+    -- The global is a live client value that /hkroll and reloads also move, so
+    -- the status line is re-read every time the page comes up.
+    status = page:Hint(StatusText())
+    page:OnRefresh(function() status:SetText(StatusText()) end)
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("rolling")
 
     Snapshot()          -- before anything writes to the global
-    BuildOptionsPanel()
     Apply()
 
     -- The global is per-session, so re-apply whenever the world reloads it away.

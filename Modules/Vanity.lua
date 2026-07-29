@@ -591,106 +591,33 @@ function ns.DeleteDuplicateVanity()
     PrepareDelete(ScanDuplicateCopies(), "duplicate vanity items")
 end
 
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Auto-Grab Vanity"
-    panel.parent = "HKSuite"
+function M:BuildSettings(page)
+    page:Check({
+        label = "Grab unlearned vanity on login",
+        tooltip = "Collects vanity spells you own but haven't learned yet.",
+        get = function() return cfg.grabOnLogin end,
+        set = function(v) cfg.grabOnLogin = v end,
+    })
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Auto-Grab Vanity")
+    page:Header("Collect")
+    page:Button({ text = "Grab unlearned vanity", width = 230, onClick = ns.GrabVanity })
+    page:Row({
+        { text = "Grab Fel Enchanted Warchest", width = 230,
+          onClick = function() ns.GrabVanityById(657112, "Fel Enchanted Warchest") end },
+        { text = "Delete Fel Warchest items", width = 210, onClick = ns.DeleteFelItems },
+    })
+    page:Button({ text = "Grab utility bundle", width = 230, onClick = ns.GrabVanityBundle })
+    page:Hint("Collects your utility vanity items (anvils, call boards, altars, retreat scrolls, and more).")
 
-    local gl = ns.CreateCheck(panel, "Grab unlearned vanity on login",
-        "Collects vanity spells you own but haven't learned yet.", cfg.grabOnLogin)
-    gl:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    gl:SetScript("OnClick", function(self) cfg.grabOnLogin = self:GetChecked() and true or false end)
-
-    local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    btn:SetSize(210, 24)
-    btn:SetText("Grab unlearned vanity")
-    btn:SetPoint("TOPLEFT", gl, "BOTTOMLEFT", 0, -14)
-    btn:SetScript("OnClick", ns.GrabVanity)
-
-    -- Fel Warchest grab + its cleanup, side by side.
-    local felBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    felBtn:SetSize(210, 24)
-    felBtn:SetText("Grab Fel Enchanted Warchest")
-    felBtn:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -8)
-    felBtn:SetScript("OnClick", function() ns.GrabVanityById(657112, "Fel Enchanted Warchest") end)
-
-    local delFelBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    delFelBtn:SetSize(200, 24)
-    delFelBtn:SetText("Delete Fel Warchest items")
-    delFelBtn:SetPoint("LEFT", felBtn, "RIGHT", 8, 0)
-    delFelBtn:SetScript("OnClick", ns.DeleteFelItems)
-
-    local bundleBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    bundleBtn:SetSize(210, 24)
-    bundleBtn:SetText("Grab utility bundle")
-    bundleBtn:SetPoint("TOPLEFT", felBtn, "BOTTOMLEFT", 0, -8)
-    bundleBtn:SetScript("OnClick", ns.GrabVanityBundle)
-
-    local bundleHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    bundleHint:SetPoint("TOPLEFT", bundleBtn, "BOTTOMLEFT", 2, -6)
-    bundleHint:SetWidth(360); bundleHint:SetJustifyH("LEFT")
-    bundleHint:SetText("Collects your utility vanity items (anvils, call boards, altars, retreat scrolls, and more).")
-
-    local collectedBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    collectedBtn:SetSize(210, 24)
-    collectedBtn:SetText("Delete collected vanity items")
-    collectedBtn:SetPoint("TOPLEFT", bundleHint, "BOTTOMLEFT", -2, -16)
-    collectedBtn:SetScript("OnClick", ns.DeleteCollectedVanity)
-
-    local collectedHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    collectedHint:SetPoint("TOPLEFT", collectedBtn, "BOTTOMLEFT", 2, -6)
-    collectedHint:SetWidth(360); collectedHint:SetJustifyH("LEFT")
-    collectedHint:SetText("Removes vanity items from your bags that you already own in your collection.")
-
-    local dupBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    dupBtn:SetSize(210, 24)
-    dupBtn:SetText("Delete duplicate vanity items")
-    dupBtn:SetPoint("TOPLEFT", collectedHint, "BOTTOMLEFT", -2, -14)
-    dupBtn:SetScript("OnClick", ns.DeleteDuplicateVanity)
-
-    local dupHint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    dupHint:SetPoint("TOPLEFT", dupBtn, "BOTTOMLEFT", 2, -6)
-    dupHint:SetWidth(360); dupHint:SetJustifyH("LEFT")
-    dupHint:SetText("Removes extra copies of vanity items, keeping one of each.")
-
-    InterfaceOptions_AddCategory(panel)
-end
-
--- Diagnostic: inspect VANITY_ITEMS so we can resolve real names/IDs.
---   /hkvanity            -> entry count + field names
---   /hkvanity thermal    -> entries whose name/item-name contains "thermal"
-SLASH_HKVANITY1 = "/hkvanity"
-SlashCmdList["HKVANITY"] = function(msg)
-    if not VANITY_ITEMS then ns.Print("VANITY_ITEMS is nil (not loaded).") return end
-    local search = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    local count, shown, sampled = 0, 0, false
-    for k, v in pairs(VANITY_ITEMS) do
-        count = count + 1
-        if not sampled and type(v) == "table" then
-            local fields = {}
-            for fk in pairs(v) do fields[#fields + 1] = tostring(fk) end
-            ns.Print("entry fields: " .. table.concat(fields, ", "))
-            sampled = true
-        end
-        if search ~= "" and shown < 20 and type(v) == "table" then
-            local nm = tostring(v.name or "")
-            local iname = v.itemid and GetItemInfo(v.itemid) or nil
-            if nm:lower():find(search, 1, true) or (iname and iname:lower():find(search, 1, true)) then
-                ns.Print(k .. " | name='" .. nm .. "'" .. (iname and (" item='" .. iname .. "'") or ""))
-                shown = shown + 1
-            end
-        end
-    end
-    ns.Print(("Total VANITY_ITEMS: %d%s"):format(count, search ~= "" and (", matches: " .. shown) or ""))
+    page:Header("Clean up bags")
+    page:Button({ text = "Delete collected vanity items", width = 230, onClick = ns.DeleteCollectedVanity })
+    page:Hint("Removes vanity items from your bags that you already own in your collection.")
+    page:Button({ text = "Delete duplicate vanity items", width = 230, onClick = ns.DeleteDuplicateVanity })
+    page:Hint("Removes extra copies of vanity items, keeping one of each.")
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("vanity")
-    BuildOptionsPanel()
 
     if cfg.grabOnLogin then
         local ev = CreateFrame("Frame")

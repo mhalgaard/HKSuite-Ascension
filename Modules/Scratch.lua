@@ -21,7 +21,7 @@ local ADDON, ns = ...
 
 local M = ns.RegisterModule({
     key   = "scratch",                          -- unique id
-    title = "Scratch Module",                   -- shown on the Overview page
+    title = "Scratch Module",                   -- shown in the settings rail
     desc  = "Prototype module (work in progress).",
 })
 
@@ -32,25 +32,27 @@ ns.defaults.scratch = {
 
 local cfg  -- filled in OnInit
 
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Scratch Module"
-    panel.parent = "HKSuite"
+-- The settings page. It is built the first time the module is selected in the
+-- settings window; see ns.UI for everything a page can hold.
+function M:BuildSettings(page)
+    page:Header("Section")
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Scratch Module")
-
-    -- Example checkbox:
-    -- local cb = ns.CreateCheck(panel, "Do the thing", "Tooltip text.", cfg.enabledThing)
-    -- cb:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    -- cb:SetScript("OnClick", function(self) cfg.enabledThing = self:GetChecked() and true or false end)
-
-    InterfaceOptions_AddCategory(panel)
+    -- page:Check({
+    --     label = "Do the thing",
+    --     tooltip = "Tooltip text.",
+    --     get = function() return cfg.enabledThing end,
+    --     set = function(v) cfg.enabledThing = v end,
+    -- })
+    --
+    -- page:Input({ label = "A value", width = 120,
+    --     get = function() return cfg.value end,
+    --     set = function(v) cfg.value = v end })
+    --
+    -- page:Button({ text = "Do it now", onClick = function() end })
 end
 
 function M:OnInit()
-    cfg = ns.config.scratch
+    cfg = ns.GetConfig("scratch")
 
     -- Register events and guard behavior behind the module toggle:
     -- local frame = CreateFrame("Frame")
@@ -60,8 +62,6 @@ function M:OnInit()
     --         -- handle event
     --     end
     -- end)
-
-    BuildOptionsPanel()
 end
 
 --]]

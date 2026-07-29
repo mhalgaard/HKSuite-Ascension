@@ -268,180 +268,101 @@ local function ColoredQuality(q, text)
     return text
 end
 
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Automation"
-    panel.parent = "HKSuite"
-
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Automation")
-
-    local BASE_X = 16
-    local yPos = -48
-
-    local function Header(text)
-        local fs = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X, yPos)
-        fs:SetText("|cffffd100" .. text .. "|r")
-        yPos = yPos - 22
-        return fs
-    end
-
-    -- Returns the checkbox so callers can wire enable/disable of its children.
-    local function AddCheck(label, tip, get, set, indent)
-        local cb = ns.CreateCheck(panel, label, tip, get())
-        cb:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X + (indent and 22 or 0), yPos)
-        cb:SetScript("OnClick", function(self)
-            set(self:GetChecked() and true or false)
-        end)
-        yPos = yPos - (indent and 22 or 24)
-        return cb
+function M:BuildSettings(page)
+    local function Check(label, tip, get, set, indent, onChange)
+        return page:Check({
+            label = label, tooltip = tip, indent = indent,
+            get = get, set = set, onChange = onChange,
+        })
     end
 
     -- ---- Auto release ----
-    Header("Auto release spirit")
+    page:Header("Auto release spirit")
 
-    local relSubs = {}
-    local function RefreshRelease()
-        local on = cfg.autoRelease
-        for _, cb in ipairs(relSubs) do
-            cb.label:SetTextColor(on and 1 or 0.5, on and 1 or 0.5, on and 1 or 0.5)
-        end
-    end
-
-    local relMaster = AddCheck("Auto release after death",
+    local release = Check("Auto release after death",
         "Automatically release your spirit when you die (in the zone types selected below). Waits briefly first and skips releasing if a resurrection is being offered or a soulstone is available.",
         function() return cfg.autoRelease end,
-        function(v) cfg.autoRelease = v; RefreshRelease() end)
+        function(v) cfg.autoRelease = v end)
 
-    relSubs[#relSubs + 1] = AddCheck("In battlegrounds",
-        "Release automatically while in a battleground.",
-        function() return cfg.releaseBG end,
-        function(v) cfg.releaseBG = v end, true)
-    relSubs[#relSubs + 1] = AddCheck("In the open world",
-        "Release automatically when you die out in the world.",
-        function() return cfg.releaseWorld end,
-        function(v) cfg.releaseWorld = v end, true)
-    relSubs[#relSubs + 1] = AddCheck("In dungeons / raids",
-        "Release automatically in 5-man dungeons and raids. Off by default so you can wait for a battle-res.",
-        function() return cfg.releaseDungeon end,
-        function(v) cfg.releaseDungeon = v end, true)
-
-    RefreshRelease()
-    yPos = yPos - 6
+    release:BindChildren({
+        Check("In battlegrounds", "Release automatically while in a battleground.",
+            function() return cfg.releaseBG end,
+            function(v) cfg.releaseBG = v end, true),
+        Check("In the open world", "Release automatically when you die out in the world.",
+            function() return cfg.releaseWorld end,
+            function(v) cfg.releaseWorld = v end, true),
+        Check("In dungeons / raids",
+            "Release automatically in 5-man dungeons and raids. Off by default so you can wait for a battle-res.",
+            function() return cfg.releaseDungeon end,
+            function(v) cfg.releaseDungeon = v end, true),
+    })
 
     -- ---- Auto sell ----
-    Header("Auto sell at vendors")
+    page:Header("Auto sell at vendors")
 
-    local sellSubs = {}
-    local function RefreshSell()
-        local on = cfg.autoSell
-        for _, cb in ipairs(sellSubs) do
-            cb.label:SetTextColor(on and 1 or 0.5, on and 1 or 0.5, on and 1 or 0.5)
-        end
-    end
-
-    AddCheck("Auto sell items when visiting a vendor",
+    local sell = Check("Auto sell items when visiting a vendor",
         "When you open a merchant window, automatically sell items of the qualities selected below (plus anything on the whitelist). Only items with a vendor value are ever sold.",
         function() return cfg.autoSell end,
-        function(v) cfg.autoSell = v; RefreshSell() end)
+        function(v) cfg.autoSell = v end)
 
+    local sellSubs = {}
     for _, entry in ipairs(QUALITIES) do
         local q = entry.q
-        sellSubs[#sellSubs + 1] = AddCheck(ColoredQuality(q, entry.label),
+        sellSubs[#sellSubs + 1] = Check(ColoredQuality(q, entry.label),
             "Auto-sell " .. entry.label:lower() .. " quality items.",
             function() return cfg.sellQuality[q] end,
             function(v) cfg.sellQuality[q] = v end, true)
     end
 
-    sellSubs[#sellSubs + 1] = AddCheck("Never sell trade goods / crafting materials",
+    sellSubs[#sellSubs + 1] = Check("Never sell trade goods / crafting materials",
         "Skips anything the client classes as Trade Goods or a reagent -- ore, herbs, cloth, leather, enchanting mats, meat -- even when its quality is ticked above.\nThe always-sell whitelist still wins over this.",
         function() return cfg.protectTradeGoods end,
         function(v) cfg.protectTradeGoods = v end, true)
 
-    sellSubs[#sellSubs + 1] = AddCheck("Never sell gemstones",
+    sellSubs[#sellSubs + 1] = Check("Never sell gemstones",
         "Skips gems and pearls -- Star Ruby, Small Lustrous Pearl, cut and uncut gems -- matched by item class, so the whole category is covered.",
         function() return cfg.protectGems end,
         function(v) cfg.protectGems = v end, true)
 
-    local elixirCheck = AddCheck("Never sell elixirs from level",
-        "Skips elixirs that require at least the level on the right, so low-level leftovers still get sold.\nFlasks and potions are separate categories and are not covered.",
+    sellSubs[#sellSubs + 1] = Check("Never sell elixirs",
+        "Skips elixirs that require at least the level below, so low-level leftovers still get sold.\nFlasks and potions are separate categories and are not covered.",
         function() return cfg.protectElixirs end,
         function(v) cfg.protectElixirs = v end, true)
-    sellSubs[#sellSubs + 1] = elixirCheck
 
-    -- The level floor sits on the elixir row itself, after its label.
-    local lvlBox = CreateFrame("EditBox", "HKSuiteElixirLevelBox", panel, "InputBoxTemplate")
-    lvlBox:SetSize(66, 20)
-    lvlBox:SetPoint("LEFT", elixirCheck.label, "RIGHT", 8, 0)
-    lvlBox:SetAutoFocus(false)
-    lvlBox:SetNumeric(true)
-    lvlBox:SetText(tostring(cfg.elixirMinLevel or 30))
-
-    local function SaveElixirLevel()
-        local v = tonumber(lvlBox:GetText() or "") or 30
-        if v < 1 then v = 1 elseif v > 255 then v = 255 end
-        cfg.elixirMinLevel = v
-        lvlBox:SetText(tostring(v))
-    end
-
-    lvlBox:SetScript("OnEnterPressed", function(self) SaveElixirLevel(); self:ClearFocus() end)
-    lvlBox:SetScript("OnEditFocusLost", SaveElixirLevel)
-    lvlBox:SetScript("OnEscapePressed", function(self)
-        self:SetText(tostring(cfg.elixirMinLevel or 30)); self:ClearFocus()
-    end)
-    ns.CreateInlineAccept(lvlBox, SaveElixirLevel)
-
-    RefreshSell()
-    yPos = yPos - 6
-
-    -- Whitelist editor.
-    local wlLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    wlLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X, yPos)
-    wlLabel:SetText("Always-sell whitelist (one item name or ID per line):")
-    yPos = yPos - 18
-
-    local wlScroll = CreateFrame("ScrollFrame", "HKSuiteAutoSellScroll", panel, "UIPanelScrollFrameTemplate")
-    wlScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X + 4, yPos)
-    wlScroll:SetSize(360, 90)
-    wlScroll:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    page:Input({
+        label = "…from required level", indent = true, width = 80,
+        name = "HKSuiteElixirLevelBox",
+        numeric = true, min = 1, max = 255, step = 1,
+        get = function() return cfg.elixirMinLevel or 30 end,
+        set = function(v) cfg.elixirMinLevel = v end,
     })
-    wlScroll:SetBackdropColor(0, 0, 0, 0.4)
 
-    local wlEdit = CreateFrame("EditBox", "HKSuiteAutoSellEdit", wlScroll)
-    wlEdit:SetMultiLine(true)
-    wlEdit:SetFontObject(ChatFontNormal)
-    wlEdit:SetWidth(340)
-    wlEdit:SetAutoFocus(false)
-    wlEdit:SetTextInsets(4, 4, 4, 4)
-    wlEdit:SetText(table.concat(cfg.whitelist, "\n"))
-    local function SaveWhitelist(text)
-        wipe(cfg.whitelist)
-        for line in text:gmatch("[^\r\n]+") do
-            line = line:gsub("^%s+", ""):gsub("%s+$", "")
-            if line ~= "" then cfg.whitelist[#cfg.whitelist + 1] = line end
-        end
+    sell:BindChildren(sellSubs)
+
+    -- ---- Whitelist ----
+    page:Header("Always-sell whitelist")
+    local saved
+    local function SavedText()
+        return "Saved: |cff00ff00" .. #cfg.whitelist .. "|r entr"
+            .. (#cfg.whitelist == 1 and "y" or "ies")
     end
-    wlEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    wlEdit:SetScript("OnEditFocusLost", function(self) SaveWhitelist(self:GetText()) end)
-    wlScroll:SetScrollChild(wlEdit)
 
-    -- The check in the box's corner commits without clicking away from it first.
-    local wlSaved = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    page:TextArea({
+        label = "One item name or ID per line. These are sold whatever the settings above say.",
+        name = "HKSuiteAutoSellEdit", height = 110,
+        get = function() return table.concat(cfg.whitelist, "\n") end,
+        set = function(text)
+            wipe(cfg.whitelist)
+            for line in text:gmatch("[^\r\n]+") do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then cfg.whitelist[#cfg.whitelist + 1] = line end
+            end
+        end,
+        onChange = function() if saved then saved:SetText(SavedText()) end end,
+    })
 
-    ns.CreateInlineAccept(wlEdit, function()
-        SaveWhitelist(wlEdit:GetText())
-        wlSaved:SetText("Saved: |cff00ff00" .. #cfg.whitelist .. "|r entr" .. (#cfg.whitelist == 1 and "y" or "ies"))
-    end, wlScroll, "TOPRIGHT", -6, -6)
-
-    wlSaved:SetPoint("TOPLEFT", wlScroll, "BOTTOMLEFT", 0, -8)
-    wlSaved:SetText("Saved: |cff00ff00" .. #cfg.whitelist .. "|r entr" .. (#cfg.whitelist == 1 and "y" or "ies"))
-
-    InterfaceOptions_AddCategory(panel)
+    saved = page:Hint(SavedText())
+    page:OnRefresh(function() saved:SetText(SavedText()) end)
 end
 
 function M:OnInit()
@@ -457,5 +378,4 @@ function M:OnInit()
         end
     end)
 
-    BuildOptionsPanel()
 end
