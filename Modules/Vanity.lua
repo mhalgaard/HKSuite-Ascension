@@ -616,34 +616,6 @@ function M:BuildSettings(page)
     page:Hint("Removes extra copies of vanity items, keeping one of each.")
 end
 
--- Diagnostic: inspect VANITY_ITEMS so we can resolve real names/IDs.
---   /hkvanity            -> entry count + field names
---   /hkvanity thermal    -> entries whose name/item-name contains "thermal"
-SLASH_HKVANITY1 = "/hkvanity"
-SlashCmdList["HKVANITY"] = function(msg)
-    if not VANITY_ITEMS then ns.Print("VANITY_ITEMS is nil (not loaded).") return end
-    local search = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    local count, shown, sampled = 0, 0, false
-    for k, v in pairs(VANITY_ITEMS) do
-        count = count + 1
-        if not sampled and type(v) == "table" then
-            local fields = {}
-            for fk in pairs(v) do fields[#fields + 1] = tostring(fk) end
-            ns.Print("entry fields: " .. table.concat(fields, ", "))
-            sampled = true
-        end
-        if search ~= "" and shown < 20 and type(v) == "table" then
-            local nm = tostring(v.name or "")
-            local iname = v.itemid and GetItemInfo(v.itemid) or nil
-            if nm:lower():find(search, 1, true) or (iname and iname:lower():find(search, 1, true)) then
-                ns.Print(k .. " | name='" .. nm .. "'" .. (iname and (" item='" .. iname .. "'") or ""))
-                shown = shown + 1
-            end
-        end
-    end
-    ns.Print(("Total VANITY_ITEMS: %d%s"):format(count, search ~= "" and (", matches: " .. shown) or ""))
-end
-
 function M:OnInit()
     cfg = ns.GetConfig("vanity")
 

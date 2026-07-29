@@ -21,7 +21,7 @@ local ADDON, ns = ...
 
 local M = ns.RegisterModule({
     key   = "scratch",                          -- unique id
-    title = "Scratch Module",                   -- shown on the Overview page
+    title = "Scratch Module",                   -- shown in the settings rail
     desc  = "Prototype module (work in progress).",
 })
 

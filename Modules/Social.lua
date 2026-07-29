@@ -234,19 +234,6 @@ local function ConfigureLootFrame(frame)
     if ChatFrame_RemoveAllChannels then ChatFrame_RemoveAllChannels(frame) end
 end
 
--- Print current chat-window state so tab problems are diagnosable in-game.
-local function ChatTabDiag()
-    ns.Print("Chat diagnostic — ElvUI: " .. (ElvUI and "loaded" or "not loaded")
-        .. ", windows: " .. NUM_CHAT_WINDOWS)
-    for i = 1, NUM_CHAT_WINDOWS do
-        local name, _, _, _, _, _, shown, _, docked = GetChatWindowInfo(i)
-        if name and name ~= "" then
-            ns.Print(("  [%d] \"%s\"  shown=%s docked=%s")
-                :format(i, name, tostring(shown), tostring(docked)))
-        end
-    end
-end
-
 -- User-driven: create the enabled tabs, or reconfigure them if they already
 -- exist. Verbose so the result is always visible in chat.
 local function RefreshTabs(verbose)
@@ -254,7 +241,6 @@ local function RefreshTabs(verbose)
         if verbose then ns.Print("Social module is disabled.") end
         return
     end
-    if verbose then ChatTabDiag() end
 
     if not (cfg.enableGuildTab or cfg.enableWorldTab or cfg.enableLootTab) then
         if verbose then ns.Print("No chat tabs are enabled above — tick one first.") end
@@ -276,8 +262,6 @@ local function RefreshTabs(verbose)
         if f then ConfigureLootFrame(f); ShowChatFrame(f); if verbose then ns.Print("Refreshed & opened \"Loot\" tab.") end
         else CreateLootTab() end
     end
-
-    if verbose then ns.Print("Result:"); ChatTabDiag() end
 end
 
 -- =========================== Friends / guildmates ============================
