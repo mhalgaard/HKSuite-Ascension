@@ -75,11 +75,36 @@ local function currentZoneToken()
 end
 
 -- Companion lookup (name substring match, like the WeakAura).
-local function findPetIndex(name)
+--
+-- The names and their indices only move when the collection itself changes, but
+-- a priority pass asks about several pets and the ticker runs every 2 seconds --
+-- so looking each one up live meant walking the entire companion list once per
+-- candidate, forever. On a big vanity collection that is thousands of
+-- GetCompanionInfo calls a second. Walk it once and reuse the result.
+local companionCache, companionCacheAt
+local COMPANION_TTL = 10
+
+local function invalidateCompanions()
+    companionCache = nil
+end
+
+local function companionList()
+    if companionCache and (GetTime() - companionCacheAt) < COMPANION_TTL then
+        return companionCache
+    end
+    local list = {}
     for i = 1, GetNumCompanions("CRITTER") do
         local _, cname = GetCompanionInfo("CRITTER", i)
-        if cname and cname:find(name, 1, true) then
-            return i, cname
+        if cname then list[#list + 1] = { idx = i, name = cname } end
+    end
+    companionCache, companionCacheAt = list, GetTime()
+    return list
+end
+
+local function findPetIndex(name)
+    for _, entry in ipairs(companionList()) do
+        if entry.name:find(name, 1, true) then
+            return entry.idx, entry.name
         end
     end
 end
@@ -302,8 +327,11 @@ function M:OnInit()
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:RegisterEvent("LFG_COMPLETION_REWARD")
+    ev:RegisterEvent("COMPANION_LEARNED")
+    ev:RegisterEvent("COMPANION_UNLEARNED")
     ev:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_ENTERING_WORLD" then
+            invalidateCompanions()   -- indices are not stable across a reload
             local _, itype = GetInstanceInfo()
             if IsInInstance() and itype == "party" then
                 dungeonEnterTime = GetTime()
@@ -313,6 +341,8 @@ function M:OnInit()
         elseif event == "LFG_COMPLETION_REWARD" then
             lfgCompleteTime = GetTime()
             lfgEverCompleted = true
+        else
+            invalidateCompanions()   -- collection changed, so the cache is stale
         end
     end)
 

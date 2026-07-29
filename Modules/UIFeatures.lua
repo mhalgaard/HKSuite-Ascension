@@ -66,6 +66,13 @@ local lastCastSpell  -- most recent spell the player cast (for the "use last" bu
 -- IsSpellInRange returns 1 (in range), 0 (out of range), or nil (unknown spell /
 -- invalid target). With a valid hostile target, a known melee spell returns 0/1,
 -- so a non-nil result reliably means "the player has this ability".
+local scanFailedAt          -- when a full probe last came up empty
+local RESCAN_AFTER = 5      -- seconds before walking the whole list again
+
+local function InvalidateMeleeSpell()
+    cachedSpell, scanFailedAt = nil, nil
+end
+
 local function ResolveMeleeSpell()
     local custom = cfg.rangeSpell
     if custom and custom ~= "" and IsSpellInRange(custom, "target") ~= nil then
@@ -74,12 +81,20 @@ local function ResolveMeleeSpell()
     if cachedSpell and IsSpellInRange(cachedSpell, "target") ~= nil then
         return cachedSpell
     end
+    -- A full probe is one IsSpellInRange call per entry in MELEE_SPELLS. Ascension
+    -- is classless, so plenty of builds know none of them -- and with no memory of
+    -- that we walked the whole list ten times a second for as long as a hostile
+    -- target was up. Back off after an empty probe; learning a spell clears it.
+    if scanFailedAt and (GetTime() - scanFailedAt) < RESCAN_AFTER then
+        return nil
+    end
     for _, name in ipairs(MELEE_SPELLS) do
         if IsSpellInRange(name, "target") ~= nil then
-            cachedSpell = name
+            cachedSpell, scanFailedAt = name, nil
             return name
         end
     end
+    scanFailedAt = GetTime()
     return nil
 end
 
@@ -114,7 +129,14 @@ local function BuildCross()
     crossFrame.bars = { hbar, vbar }
 
     -- The frame must stay shown or its OnUpdate never fires; we toggle the bars.
+    -- Only act on an actual change: the tracker spends most of its life disabled
+    -- or without a target, and re-hiding already-hidden textures ten times a
+    -- second is pure waste.
+    local barsShown
     local function ShowBars(show)
+        show = show and true or false
+        if barsShown == show then return end
+        barsShown = show
         for _, bar in ipairs(crossFrame.bars) do
             if show then bar:Show() else bar:Hide() end
         end
@@ -918,12 +940,16 @@ local function BuildLootRollsFrame()
     end
 
     -- Drives the countdown, closes rolls nobody answered, and hides the section
-    -- once it has gone stale (or the module was switched off on the Overview).
+    -- once it has gone stale (or the module was switched off in the settings).
+    -- Nothing here can matter until a roll has actually been recorded, so the
+    -- common case -- feature off, or simply not in a group -- costs one table
+    -- length check.
     lootFrame.ticker = CreateFrame("Frame")
     lootFrame.ticker:SetScript("OnUpdate", function(self, e)
         self.elapsed = (self.elapsed or 0) + e
         if self.elapsed < 0.25 then return end
         self.elapsed = 0
+        if #rolls == 0 then return end
 
         local now = GetTime()
         local dirty, pending = false, false
@@ -976,7 +1002,7 @@ function M:BuildSettings(page)
         get = function() return cfg.rangeSpell or "" end,
         set = function(v)
             cfg.rangeSpell = v
-            cachedSpell = nil          -- force a re-resolve with the new preference
+            InvalidateMeleeSpell()          -- force a re-resolve with the new preference
         end,
         onChange = function() if saved then saved:SetText(SavedText()) end end,
     })
@@ -992,7 +1018,7 @@ function M:BuildSettings(page)
         onClick = function()
             if lastCastSpell and lastCastSpell ~= "" then
                 cfg.rangeSpell = lastCastSpell
-                cachedSpell = nil
+                InvalidateMeleeSpell()
                 spell:Refresh()
                 saved:SetText(SavedText())
                 ns.Print("Range ability set to: " .. lastCastSpell)
@@ -1007,7 +1033,7 @@ function M:BuildSettings(page)
     hooksecurefunc("ChatEdit_InsertLink", function(link)
         if link and spell.box:HasFocus() then
             cfg.rangeSpell = tostring(link):match("%[(.-)%]") or tostring(link)
-            cachedSpell = nil
+            InvalidateMeleeSpell()
             spell:Refresh()
             saved:SetText(SavedText())
         end
@@ -1114,11 +1140,17 @@ function M:OnInit()
     ev:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
     ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
     ev:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    ev:RegisterEvent("SPELLS_CHANGED")
     ev:SetScript("OnEvent", function(_, event, unit, spellName)
         if event == "UNIT_SPELLCAST_SUCCEEDED" then
             if unit == "player" and spellName and spellName ~= "" then
                 lastCastSpell = spellName
             end
+            return
+        elseif event == "SPELLS_CHANGED" then
+            -- Your abilities changed, so a probe that found nothing might now
+            -- succeed. Drop the back-off instead of waiting it out.
+            InvalidateMeleeSpell()
             return
         end
         UpdateTrinkets()
