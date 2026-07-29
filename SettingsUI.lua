@@ -37,19 +37,21 @@ ns.UI = UI
 
 -- ------------------------------------------------------------------- palette
 local C = {
-    window    = { 0.055, 0.055, 0.065, 0.96 },
-    rail      = { 0.085, 0.085, 0.098, 1.00 },
+    window    = { 0.125, 0.125, 0.140, 0.97 },
+    rail      = { 0.160, 0.160, 0.178, 1.00 },
     railSel   = { 1.000, 0.820, 0.000, 0.10 },
-    border    = { 0.200, 0.200, 0.230, 1.00 },
-    line      = { 1.000, 1.000, 1.000, 0.07 },
-    field     = { 0.020, 0.020, 0.030, 0.90 },
-    hover     = { 1.000, 1.000, 1.000, 0.06 },
-    text      = { 0.880, 0.880, 0.900 },
-    muted     = { 0.560, 0.560, 0.600 },
-    dim       = { 0.380, 0.380, 0.400 },
+    border    = { 0.300, 0.300, 0.340, 1.00 },
+    line      = { 1.000, 1.000, 1.000, 0.10 },
+    field     = { 0.078, 0.078, 0.090, 0.95 },
+    hover     = { 1.000, 1.000, 1.000, 0.07 },
+    text      = { 0.900, 0.900, 0.915 },
+    muted     = { 0.630, 0.630, 0.665 },
+    dim       = { 0.470, 0.470, 0.495 },
     accent    = { 1.000, 0.820, 0.000 },
-    off       = { 0.260, 0.260, 0.290 },
-    warn      = { 1.000, 0.550, 0.150 },
+    off       = { 0.330, 0.330, 0.365 },
+    warn      = { 1.000, 0.600, 0.200 },
+    control   = { 0.215, 0.215, 0.240, 1.00 },   -- button face
+    controlHi = { 0.290, 0.290, 0.320, 1.00 },
 }
 UI.colors = C
 
@@ -152,7 +154,7 @@ local function DropdownPopup()
     dropPopup = CreateFrame("Frame", "HKSuiteDropdownPopup", UIParent)
     dropPopup:SetFrameStrata("FULLSCREEN_DIALOG")
     dropPopup:SetToplevel(true)
-    SetFlatBackdrop(dropPopup, { 0.04, 0.04, 0.05, 0.98 }, C.border)
+    SetFlatBackdrop(dropPopup, { 0.145, 0.145, 0.162, 0.98 }, C.border)
     dropPopup:Hide()
     dropPopup.rows = {}
 
@@ -244,9 +246,13 @@ end
 -- stack them without knowing what any of them are.
 
 -- A flat check: a bordered box that fills with the accent colour when on.
+-- Every widget below is a wrapper frame holding the real control. The wrapper
+-- MUST be given a width: a frame whose rect can't be resolved is not drawn, and
+-- neither is anything parented to it, so a wrapper left at zero width takes its
+-- input/dropdown/slider down with it.
 local function MakeCheck(parent, opts)
     local f = CreateFrame("Button", nil, parent)
-    f:SetHeight(math.max(CHECK_SIZE, 18))
+    f:SetSize(opts.width or 240, math.max(CHECK_SIZE, 18))
 
     local box = CreateFrame("Frame", nil, f)
     box:SetSize(CHECK_SIZE, CHECK_SIZE)
@@ -361,7 +367,7 @@ end
 -- Flat single-line input. `numeric` clamps to [min,max] on commit.
 local function MakeInput(parent, opts)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetHeight(FIELD_H)
+    f:SetSize(opts.width or 160, FIELD_H)
 
     local box = CreateFrame("EditBox", opts.name, f)
     box:SetHeight(FIELD_H)
@@ -418,7 +424,7 @@ end
 local function MakeTextArea(parent, opts)
     local height = opts.height or 96
     local f = CreateFrame("Frame", nil, parent)
-    f:SetHeight(height)
+    f:SetSize(opts.width or (PAGE_W - 30), height)
 
     local scrollName = NextName("TextArea")
     local frame = CreateFrame("ScrollFrame", scrollName, f, "UIPanelScrollFrameTemplate")
@@ -464,7 +470,7 @@ end
 -- Flat dropdown: a bordered button plus the shared popup.
 local function MakeDropdown(parent, opts)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetHeight(FIELD_H)
+    f:SetSize(opts.width or 150, FIELD_H)
 
     local btn = CreateFrame("Button", nil, f)
     btn:SetHeight(FIELD_H)
@@ -539,7 +545,7 @@ end
 -- Flat slider with the value written into its own label.
 local function MakeSlider(parent, opts)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetHeight(38)
+    f:SetSize(opts.width or 220, 38)
 
     local label = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     label:SetPoint("TOPLEFT", 0, 0)
@@ -601,7 +607,7 @@ end
 local function MakeButton(parent, opts)
     local f = CreateFrame("Button", nil, parent)
     f:SetSize(opts.width or 180, opts.height or 24)
-    SetFlatBackdrop(f, { 0.14, 0.14, 0.16, 1 }, C.border)
+    SetFlatBackdrop(f, C.control, C.border)
 
     local text = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     text:SetPoint("CENTER")
@@ -609,7 +615,7 @@ local function MakeButton(parent, opts)
     f.text = text
 
     f:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.20, 0.20, 0.23, 1)
+        self:SetBackdropColor(C.controlHi[1], C.controlHi[2], C.controlHi[3], 1)
         self:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3])
         if opts.tooltip then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -618,7 +624,7 @@ local function MakeButton(parent, opts)
         end
     end)
     f:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.14, 0.14, 0.16, 1)
+        self:SetBackdropColor(C.control[1], C.control[2], C.control[3], 1)
         self:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
         GameTooltip:Hide()
     end)
@@ -638,7 +644,11 @@ function Page:_Place(widget, indent, gap)
     widget:ClearAllPoints()
     local x = (indent or 0) * INDENT
     widget:SetPoint("TOPLEFT", self.content, "TOPLEFT", x, self.y)
-    if widget.SetWidth and widget.autoWidth then
+    -- Checks claim the whole row: the wrapper is their click target, so a full
+    -- width means clicking anywhere on the line toggles them. Anything else keeps
+    -- the width its constructor chose, and a zero width is repaired rather than
+    -- silently swallowing the widget.
+    if widget.autoWidth or widget:GetWidth() <= 0 then
         widget:SetWidth(self.width - x)
     end
     self.y = self.y - widget:GetHeight() - (gap or ROW_GAP)
@@ -774,20 +784,16 @@ function Page:Row(items, opts)
         elseif item.kind == "check" then w = MakeCheck(self.content, item)
         elseif item.kind == "input" then w = MakeInput(self.content, item)
         else w = MakeButton(self.content, item) end
-        -- A check's whole frame is the click target, and only a button sizes
-        -- itself, so anything else in a row needs a width or it can't be hit.
-        if item.kind == "check" then w:SetWidth(item.width or 200) end
+        if w:GetWidth() <= 0 then w:SetWidth(item.width or 200) end
         built[#built + 1] = { w, item }
         tallest = math.max(tallest, w:GetHeight())
     end
 
     for _, entry in ipairs(built) do
-        local w, item = entry[1], entry[2]
+        local w = entry[1]
         w:ClearAllPoints()
         w:SetPoint("TOPLEFT", self.content, "TOPLEFT", x, self.y)
-        local ownWidth = item.width or (w.button and w.button:GetWidth())
-            or (w.box and w.box:GetWidth()) or w:GetWidth()
-        x = x + ownWidth + gap
+        x = x + w:GetWidth() + gap
         self.widgets[#self.widgets + 1] = w
     end
 
@@ -820,6 +826,7 @@ function Page:Grid(columns, items, opts)
             get = item.get, set = item.set, onChange = item.onChange,
         })
         dd:ClearAllPoints()
+        dd:SetWidth(colW - 12)
         dd:SetPoint("TOPLEFT", self.content, "TOPLEFT", x, y - fs:GetStringHeight() - 4)
         self.widgets[#self.widgets + 1] = dd
         rowHeight = fs:GetStringHeight() + 4 + dd:GetHeight() + 12
@@ -915,7 +922,7 @@ end
 -- scope belongs to the module but is not the module's business to draw.
 local function BuildScopeRow(parent, module)
     local row = CreateFrame("Frame", nil, parent)
-    row:SetHeight(FIELD_H)
+    row:SetSize(PAGE_W, FIELD_H)
 
     local label = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     label:SetPoint("LEFT", 0, 0)
