@@ -117,10 +117,40 @@ local function canAttemptSummon()
     return true
 end
 
-local function buildPriorityList()
+local LOOTBOT = "Lootbot 3000"
+
+-- With the Loot-Transfigurator owned the Lootbot adds nothing, so it is replaced
+-- wherever a context asks for it -- the surrounding priority is untouched, the
+-- Lootbot's slot in it just goes to something else. Your safe-zone pet takes that
+-- slot if you have named one, otherwise Fix-o-Tron does.
+--
+-- This used to be `table.remove(list, 1)` on the open-world list, which was wrong
+-- twice over: it never applied in Manastorm, dungeons or raids, and while
+-- levelling position 1 is the Book of Ascension, so it dropped the Book and left
+-- the Lootbot in place.
+local function substituteLootbot(list)
+    if not (cfg.lootTrans and findPetIndex("Loot-Transfigurator")) then return list end
+
+    local replacement = cfg.safeZonePet
+    if not replacement or replacement == "" then replacement = "Fix-o-Tron" end
+
+    -- The replacement is often already further down the list, so de-duplicate as
+    -- we go and let it keep the earlier (Lootbot's) position.
+    local out, seen = {}, {}
+    for _, name in ipairs(list) do
+        local pick = (name == LOOTBOT) and replacement or name
+        if not seen[pick] then
+            seen[pick] = true
+            out[#out + 1] = pick
+        end
+    end
+    return out
+end
+
+local function contextPriorityList()
     -- Manastorm: Cogsley (ideally with the Eye buff) then Lootbot.
     if inManastorm() then
-        return { "Cogsley", "Lootbot 3000" }
+        return { "Cogsley", LOOTBOT }
     end
 
     local _, instanceType, difficultyIndex = GetInstanceInfo()
@@ -136,10 +166,10 @@ local function buildPriorityList()
                     table.insert(list, "Wondrous Wisdomball")
                 end
             end
-            table.insert(list, "Lootbot 3000")
+            table.insert(list, LOOTBOT)
             return list
         elseif instanceType == "raid" then
-            return { "Lootbot 3000" }
+            return { LOOTBOT }
         end
     end
 
@@ -155,16 +185,14 @@ local function buildPriorityList()
     -- prefers the Book; otherwise Lootbot leads.
     local maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 80
     local leveling = UnitLevel("player") < maxLevel and not lfgEverCompleted
-    local list
     if leveling then
-        list = { "Book of Ascension", "Lootbot 3000", "Treasure Keeper", "Fix-o-Tron" }
-    else
-        list = { "Lootbot 3000", "Book of Ascension", "Treasure Keeper", "Fix-o-Tron" }
+        return { "Book of Ascension", LOOTBOT, "Treasure Keeper", "Fix-o-Tron" }
     end
-    if cfg.lootTrans and findPetIndex("Loot-Transfigurator") then
-        table.remove(list, 1)   -- drop Lootbot if the Transfigurator is owned
-    end
-    return list
+    return { LOOTBOT, "Book of Ascension", "Treasure Keeper", "Fix-o-Tron" }
+end
+
+local function buildPriorityList()
+    return substituteLootbot(contextPriorityList())
 end
 
 -- Summon the highest-priority owned pet for the current context.
@@ -222,10 +250,14 @@ function M:BuildSettings(page)
     })
     page:Check({
         label = "Skip Lootbot if Loot-Transfigurator is owned",
-        tooltip = "Removes Lootbot 3000 from the priority when you own the Loot-Transfigurator.",
+        tooltip = "The Lootbot adds nothing once you own the Loot-Transfigurator, so its slot in "
+            .. "the priority goes to something else instead.\n\nEvery situation keeps its normal "
+            .. "priority; only the Lootbot is swapped out, for your safe-zone pet if you have "
+            .. "named one, otherwise Fix-o-Tron.",
         get = function() return cfg.lootTrans end,
         set = function(v) cfg.lootTrans = v end,
     })
+    page:Hint("Only takes effect while you actually own the Loot-Transfigurator.")
 
     page:Spacer(6)
     page:Slider({
@@ -240,7 +272,9 @@ function M:BuildSettings(page)
     page:Input({
         label = "Safe-zone pet (name)",
         name = "HKSuitePetSafeZone", width = 200,
-        tooltip = "Summoned instead of the usual priority while resting or AFK in a safe zone.",
+        tooltip = "Summoned instead of the usual priority while resting or AFK in a safe zone.\n\n"
+            .. "Also stands in for the Lootbot everywhere, if the option above is on.\n\n"
+            .. "Matched as a substring, so part of the name is enough.",
         get = function() return cfg.safeZonePet or "" end,
         set = function(v) cfg.safeZonePet = v end,
     })
@@ -256,6 +290,9 @@ function M:BuildSettings(page)
         "• While leveling (before your first LFG completion):  Book of Ascension leads\n" ..
         "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension"
     )
+    page:Text("With \"Skip Lootbot\" on and the Loot-Transfigurator owned, every Lootbot 3000 above "
+        .. "becomes your safe-zone pet (or Fix-o-Tron if you haven't named one). Nothing else about "
+        .. "the order changes.")
     page:Hint("Wisdomball is only used in Normal dungeons, never Heroic/Mythic.")
 end
 
