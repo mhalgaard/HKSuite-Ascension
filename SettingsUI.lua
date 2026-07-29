@@ -124,13 +124,22 @@ local function NextName(prefix)
     return "HKSuite" .. prefix .. uid
 end
 
--- Strip the template's artwork down to a bare thumb.
+-- Strip the template's artwork down to a bare thumb: no step arrows, no track
+-- art, just a thin bar that appears where the content overflows.
 local function FlattenScrollBar(scrollName)
     local bar = _G[scrollName .. "ScrollBar"]
     if not bar then return end
-    local up, down = _G[bar:GetName() .. "ScrollUpButton"], _G[bar:GetName() .. "ScrollDownButton"]
-    if up then up:Hide() end
-    if down then down:Hide() end
+
+    -- The step arrows are the scrollbar's only child buttons, so hide them by
+    -- walking its children rather than by $parentScrollUpButton naming -- this
+    -- client's FrameXML doesn't have to follow Blizzard's, and a lookup that
+    -- misses leaves the arrows sitting there with no way to tell.
+    for _, child in ipairs({ bar:GetChildren() }) do
+        if child.GetObjectType and child:GetObjectType() == "Button" then
+            child:Hide()
+        end
+    end
+
     for _, region in ipairs({ bar:GetRegions() }) do
         if region.GetObjectType and region:GetObjectType() == "Texture" then region:SetTexture(nil) end
     end
