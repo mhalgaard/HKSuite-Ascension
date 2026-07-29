@@ -127,18 +127,32 @@ end
 -- Strip the template's artwork down to a bare thumb: no step arrows, no track
 -- art, just a thin bar that appears where the content overflows.
 local function FlattenScrollBar(scrollName)
+    local scroll = _G[scrollName]
     local bar = _G[scrollName .. "ScrollBar"]
     if not bar then return end
 
-    -- The step arrows are the scrollbar's only child buttons, so hide them by
-    -- walking its children rather than by $parentScrollUpButton naming -- this
-    -- client's FrameXML doesn't have to follow Blizzard's, and a lookup that
-    -- misses leaves the arrows sitting there with no way to tell.
-    for _, child in ipairs({ bar:GetChildren() }) do
-        if child.GetObjectType and child:GetObjectType() == "Button" then
-            child:Hide()
+    -- Kill the step arrows. They are Buttons, but which frame owns them varies:
+    -- Blizzard parents them to the scrollbar, this client's FrameXML parents them
+    -- to the scroll frame and only anchors them to the bar -- so sweep both, by
+    -- object type rather than by $parentScrollUpButton naming. Sweeping the
+    -- scroll frame is safe because every caller flattens before adding any button
+    -- of its own.
+    --
+    -- Hidden *and* transparent *and* mouse-dead: the scroll templates re-enable
+    -- these as the range changes, and a client that re-shows them shouldn't be
+    -- able to put them back on screen.
+    local function killButtons(owner)
+        if not (owner and owner.GetChildren) then return end
+        for _, child in ipairs({ owner:GetChildren() }) do
+            if child.GetObjectType and child:GetObjectType() == "Button" then
+                child:Hide()
+                child:SetAlpha(0)
+                child:EnableMouse(false)
+            end
         end
     end
+    killButtons(bar)
+    killButtons(scroll)
 
     for _, region in ipairs({ bar:GetRegions() }) do
         if region.GetObjectType and region:GetObjectType() == "Texture" then region:SetTexture(nil) end
