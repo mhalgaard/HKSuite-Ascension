@@ -115,12 +115,26 @@ end
 -- the roll buttons' OnClick; since we call RollOnLoot directly we must do it.
 -- ElvUI replaces the frames with its own bars (Misc.RollBars) that it only
 -- releases on CANCEL_LOOT_ROLL, so we release its bar via its module API too.
+--
+-- A rollID is not unique to the bar: a replacement bar also stamps it on the
+-- widgets inside, and ElvUI puts it on the bar's item icon (which is what owns
+-- the item tooltip). So "hide everything carrying this id" is too blunt -- it
+-- hid the icon as well, ElvUI's release only clears the id on the bar itself,
+-- and recycling a bar never shows the icon again. Every auto-rolled item cost
+-- one pooled bar its icon until the next reload. The sweep is now a last resort
+-- for bars we don't know about, and it only takes the outermost match.
 local function HideRollFrameNow(rollID)
+    local handled = false
+
     -- Default Blizzard group-loot frames.
     for i = 1, (NUM_GROUP_LOOT_FRAMES or 4) do
         local f = _G["GroupLootFrame" .. i]
-        if f and f.rollID == rollID then f:Hide() end
+        if f and f.rollID == rollID then
+            f:Hide()
+            handled = true
+        end
     end
+
     -- ElvUI: release its loot bar for this rollID (frees it for reuse + hides).
     local Misc = ElvUI and ElvUI[1] and ElvUI[1]:GetModule("Misc", true)
     if Misc and Misc.RollBars then
@@ -128,17 +142,32 @@ local function HideRollFrameNow(rollID)
             if frame.rollID == rollID then
                 if Misc.ReleaseFrame then pcall(Misc.ReleaseFrame, Misc, frame)
                 else pcall(frame.Hide, frame) end
+                handled = true
                 break
             end
         end
     end
-    -- Generic fallback: any other replacement frame tagged with this rollID.
-    if EnumerateFrames then
-        local f = EnumerateFrames()
-        while f do
-            if f.rollID == rollID and f.IsShown and f:IsShown() then pcall(f.Hide, f) end
-            f = EnumerateFrames(f)
+
+    if handled or not EnumerateFrames then return end
+
+    -- Unknown replacement bar. EnumerateFrames walks in creation order, so a
+    -- parent always comes before its children -- which lets us hide a bar and
+    -- then skip everything inside it.
+    local hidden = {}
+    local f = EnumerateFrames()
+    while f do
+        if f.rollID == rollID and f.IsShown and f:IsShown() then
+            local inside, parent = false, f.GetParent and f:GetParent()
+            while parent do
+                if hidden[parent] then inside = true break end
+                parent = parent.GetParent and parent:GetParent()
+            end
+            if not inside then
+                hidden[f] = true
+                pcall(f.Hide, f)
+            end
         end
+        f = EnumerateFrames(f)
     end
 end
 
