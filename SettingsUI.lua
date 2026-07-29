@@ -774,6 +774,9 @@ function Page:Row(items, opts)
         elseif item.kind == "check" then w = MakeCheck(self.content, item)
         elseif item.kind == "input" then w = MakeInput(self.content, item)
         else w = MakeButton(self.content, item) end
+        -- A check's whole frame is the click target, and only a button sizes
+        -- itself, so anything else in a row needs a width or it can't be hit.
+        if item.kind == "check" then w:SetWidth(item.width or 200) end
         built[#built + 1] = { w, item }
         tallest = math.max(tallest, w:GetHeight())
     end
