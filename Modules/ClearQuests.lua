@@ -124,105 +124,78 @@ function ns.ClearQuests(confirm)
 end
 
 -- ------------------------------------------------------------------- options
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Clear Quests"
-    panel.parent = "HKSuite"
-
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Clear Quests")
-
-    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    clearBtn:SetSize(160, 24)
-    clearBtn:SetText("Clear quests now")
-    clearBtn:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
-    clearBtn:SetScript("OnClick", function() ns.ClearQuests(true) end)
-
-    local note = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    note:SetPoint("LEFT", clearBtn, "RIGHT", 10, 0)
-    note:SetText("Prestige and Mentorship quests are always kept.")
-
-    -- Fixed columns + running y so top-level checks align and sub-options indent
-    -- consistently (no drifting staircase).
-    local BASE_X = 16
-    local yPos = -74
-    local function AddCheck(label, tip, key, indent)
-        local cb = ns.CreateCheck(panel, label, tip, cfg[key])
-        cb:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X + (indent and 22 or 0), yPos)
-        cb:SetScript("OnClick", function(self) cfg[key] = self:GetChecked() and true or false end)
-        yPos = yPos - (indent and 22 or 26)
-        return cb
-    end
-
-    AddCheck("Keep completed quests", "Keep non-trivial quests that are complete.", "keepComplete")
-    AddCheck("…including trivial (10+ levels below)", "Also keep completed quests far below your level.", "keepTrivialComplete", true)
-    AddCheck("Keep daily quests", "Keep quests marked as daily.", "keepDaily")
-    AddCheck("Keep dungeon quests", "Keep non-trivial dungeon quests.", "keepDungeon")
-    AddCheck("…including trivial (10+ levels below)", "Also keep dungeon quests far below your level.", "keepTrivialDungeon", true)
-    AddCheck("Keep Path to Ascension quests", "Keep quests related to the Path to Ascension.", "keepAscension")
-    AddCheck("Keep quests with progress", "Keep non-trivial quests that have any objective progress.", "keepPartialProgress")
-    AddCheck("…including trivial (10+ levels below)", "Also keep in-progress quests far below your level.", "keepTrivialPartialProgress", true)
-
-    -- Whitelist editor.
-    local wlLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    wlLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", BASE_X, yPos - 12)
-    wlLabel:SetText("Always-keep whitelist (one quest title per line):")
-
-    local wlScroll = CreateFrame("ScrollFrame", "HKSuiteCQScroll", panel, "UIPanelScrollFrameTemplate")
-    wlScroll:SetPoint("TOPLEFT", wlLabel, "BOTTOMLEFT", 4, -6)
-    wlScroll:SetSize(360, 90)
-    wlScroll:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+function M:BuildSettings(page)
+    page:Button({
+        text = "Clear quests now", width = 180,
+        tooltip = "Abandons every quest that none of the rules below protect.",
+        onClick = function() ns.ClearQuests(true) end,
     })
-    wlScroll:SetBackdropColor(0, 0, 0, 0.4)
+    page:Hint("Prestige and Mentorship quests are always kept.")
 
-    local wlEdit = CreateFrame("EditBox", "HKSuiteCQEdit", wlScroll)
-    wlEdit:SetMultiLine(true)
-    wlEdit:SetFontObject(ChatFontNormal)
-    wlEdit:SetWidth(340)
-    wlEdit:SetAutoFocus(false)
-    wlEdit:SetTextInsets(4, 4, 4, 4)
-    wlEdit:SetText(table.concat(cfg.whitelist, "\n"))
-    local function saveWhitelist(text)
-        wipe(cfg.whitelist)
-        for line in text:gmatch("[^\r\n]+") do
-            line = line:gsub("^%s+", ""):gsub("%s+$", "")
-            if line ~= "" then cfg.whitelist[#cfg.whitelist + 1] = line end
-        end
+    page:Header("Keep")
+    local function Check(label, tip, key, indent)
+        return page:Check({
+            label = label, tooltip = tip, indent = indent,
+            get = function() return cfg[key] end,
+            set = function(v) cfg[key] = v end,
+        })
     end
-    wlEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    wlEdit:SetScript("OnEditFocusLost", function(self) saveWhitelist(self:GetText()) end)
-    wlScroll:SetScrollChild(wlEdit)
 
-    -- The check in the box's corner commits without clicking away from it first.
-    ns.CreateInlineAccept(wlEdit, function()
-        saveWhitelist(wlEdit:GetText())
-    end, wlScroll, "TOPRIGHT", -6, -6)
+    local complete = Check("Keep completed quests", "Keep non-trivial quests that are complete.", "keepComplete")
+    complete:BindChildren({
+        Check("…including trivial (10+ levels below)",
+            "Also keep completed quests far below your level.", "keepTrivialComplete", true),
+    })
 
-    local appendBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    appendBtn:SetSize(180, 22)
-    appendBtn:SetText("Add current quests")
-    appendBtn:SetPoint("TOPLEFT", wlScroll, "BOTTOMLEFT", -4, -8)
-    appendBtn:SetScript("OnClick", function()
-        local existing = {}
-        for _, v in ipairs(cfg.whitelist) do existing[v] = true end
-        for i = 1, GetNumQuestLogEntries() do
-            local qt, _, _, _, isHeader = GetQuestLogTitle(i)
-            if qt and not isHeader and not existing[qt] then
-                cfg.whitelist[#cfg.whitelist + 1] = qt
-                existing[qt] = true
+    Check("Keep daily quests", "Keep quests marked as daily.", "keepDaily")
+
+    local dungeon = Check("Keep dungeon quests", "Keep non-trivial dungeon quests.", "keepDungeon")
+    dungeon:BindChildren({
+        Check("…including trivial (10+ levels below)",
+            "Also keep dungeon quests far below your level.", "keepTrivialDungeon", true),
+    })
+
+    Check("Keep Path to Ascension quests", "Keep quests related to the Path to Ascension.", "keepAscension")
+
+    local progress = Check("Keep quests with progress",
+        "Keep non-trivial quests that have any objective progress.", "keepPartialProgress")
+    progress:BindChildren({
+        Check("…including trivial (10+ levels below)",
+            "Also keep in-progress quests far below your level.", "keepTrivialPartialProgress", true),
+    })
+
+    page:Header("Always-keep whitelist")
+    local area = page:TextArea({
+        label = "One quest title per line.",
+        name = "HKSuiteCQEdit", height = 110,
+        get = function() return table.concat(cfg.whitelist, "\n") end,
+        set = function(text)
+            wipe(cfg.whitelist)
+            for line in text:gmatch("[^\r\n]+") do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then cfg.whitelist[#cfg.whitelist + 1] = line end
             end
-        end
-        wlEdit:SetText(table.concat(cfg.whitelist, "\n"))
-    end)
+        end,
+    })
 
-    InterfaceOptions_AddCategory(panel)
+    page:Button({
+        text = "Add current quests", width = 180,
+        tooltip = "Appends every quest currently in your log to the whitelist.",
+        onClick = function()
+            local existing = {}
+            for _, v in ipairs(cfg.whitelist) do existing[v] = true end
+            for i = 1, GetNumQuestLogEntries() do
+                local qt, _, _, _, isHeader = GetQuestLogTitle(i)
+                if qt and not isHeader and not existing[qt] then
+                    cfg.whitelist[#cfg.whitelist + 1] = qt
+                    existing[qt] = true
+                end
+            end
+            area:Refresh()
+        end,
+    })
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("clearquests")
-    BuildOptionsPanel()
 end

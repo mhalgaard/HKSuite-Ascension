@@ -148,8 +148,7 @@ local function CreateWidgets()
         end
         if IsControlKeyDown() then return end   -- CTRL is reserved for dragging
         if IsShiftKeyDown() then
-            InterfaceOptionsFrame_OpenToCategory(ns.overviewPanel)
-            InterfaceOptionsFrame_OpenToCategory(ns.overviewPanel)  -- twice: WotLK quirk
+            ns.ToggleSettings()
             return
         end
         ToggleMenu()
@@ -172,41 +171,40 @@ local function ApplyButton()
     button:SetShown(cfg.showButton and ns.IsModuleEnabled("addonbutton"))
 end
 
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Addon Button"
-    panel.parent = "HKSuite"
+function M:BuildSettings(page)
+    page:Check({
+        label = "Show the movable HK button",
+        tooltip = "Displays a square HK button (CTRL+drag to move) that opens the addon-buttons menu.",
+        get = function() return cfg.showButton end,
+        set = function(v) cfg.showButton = v end,
+        onChange = ApplyButton,
+    })
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Addon Button")
+    page:Spacer(6)
+    page:Button({
+        text = "Rescan / reset position", width = 190,
+        tooltip = "Rescans for addon buttons and moves the HK button back to its default spot.",
+        onClick = function()
+            cfg.buttonPos = false
+            RestoreButtonPos()
+            LayoutMenu()
+        end,
+    })
 
-    local sb = ns.CreateCheck(panel, "Show the movable HK button",
-        "Displays a square HK button (CTRL+drag to move) that opens the addon-buttons menu.", cfg.showButton)
-    sb:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    sb:SetScript("OnClick", function(self)
-        cfg.showButton = self:GetChecked() and true or false
-        ApplyButton()
-    end)
+    page:Hint("Click the button for the addon menu, shift+click to open these settings, "
+        .. "shift+CTRL+right-click to clear quests, CTRL+drag to move it.")
+end
 
-    local rescan = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    rescan:SetSize(160, 24)
-    rescan:SetText("Rescan / reset position")
-    rescan:SetPoint("TOPLEFT", sb, "BOTTOMLEFT", 0, -16)
-    rescan:SetScript("OnClick", function()
-        cfg.buttonPos = false
-        RestoreButtonPos()
-        LayoutMenu()
-    end)
-
-    InterfaceOptions_AddCategory(panel)
+-- The rail switch has to reach the button itself, which only re-reads its state
+-- when something asks it to.
+function M:OnToggle()
+    ApplyButton()
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("addonbutton")
     CreateWidgets()
     ApplyButton()
-    BuildOptionsPanel()
 
     -- Grab minimap buttons on load. Two delayed passes catch addons that
     -- create their button late.

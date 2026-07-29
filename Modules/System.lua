@@ -151,96 +151,66 @@ local function InstallDeleteHandlers()
 end
 
 -- ------------------------------------------------------------------- options
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "System"
-    panel.parent = "HKSuite"
-
-    local scroll = CreateFrame("ScrollFrame", "HKSuiteSystemScroll", panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 8, -8)
-    scroll:SetPoint("BOTTOMRIGHT", -28, 8)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(520, 760)
-    scroll:SetScrollChild(content)
-
-    local BASE_X = 12
-    local y = -8
-
-    local function Title(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        fs:SetPoint("TOPLEFT", BASE_X, y); fs:SetText(text); y = y - 28
-    end
-    local function Header(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", BASE_X, y); fs:SetText("|cffffd100" .. text .. "|r"); y = y - 22
-    end
-    local function AddOption(label, tip, key)
-        local cb = ns.CreateCheck(content, label, tip, cfg[key])
-        cb:SetPoint("TOPLEFT", BASE_X, y)
-        cb:SetScript("OnClick", function(self)
-            cfg[key] = self:GetChecked() and true or false
-            ApplyOption(key)
-        end)
-        y = y - 24
-        return cb
+function M:BuildSettings(page)
+    local function Option(label, tip, key)
+        return page:Check({
+            label = label, tooltip = tip,
+            get = function() return cfg[key] end,
+            set = function(v) cfg[key] = v end,
+            onChange = function() ApplyOption(key) end,
+        })
     end
 
-    Title("System")
-
-    Header("Display")
-    AddOption("Disable screen glow",
+    page:Header("Display")
+    Option("Disable screen glow",
         "Turns off the full-screen glow effect.", "disableGlow")
-    AddOption("Disable screen effects",
+    Option("Disable screen effects",
         "Turns off the death and nether-world screen effects.", "disableScreenEffects")
-    AddOption("Set weather density to 0",
+    Option("Set weather density to 0",
         "Removes rain, snow and other weather.", "weatherZero")
 
-    -- Camera distance slider (only starts managing the CVar once moved).
-    local camSlider = CreateFrame("Slider", "HKSuiteCameraSlider", content, "OptionsSliderTemplate")
-    camSlider:SetPoint("TOPLEFT", BASE_X + 4, y - 18)
-    camSlider:SetMinMaxValues(1.0, 2.6)
-    camSlider:SetValueStep(0.1)
-    camSlider:SetWidth(220)
-    _G[camSlider:GetName() .. "Low"]:SetText("Min")
-    _G[camSlider:GetName() .. "High"]:SetText("Max")
-    local initial = (type(cfg.cameraFactor) == "number" and cfg.cameraFactor)
-        or tonumber(GetCVar("cameraDistanceMaxFactor")) or 1.0
-    camSlider:SetValue(initial)   -- set before wiring OnValueChanged so it doesn't self-fire
-    _G[camSlider:GetName() .. "Text"]:SetText("Camera distance: " .. string.format("%.1f", initial))
-    camSlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value * 10 + 0.5) / 10
-        cfg.cameraFactor = value
-        SetCVar("cameraDistanceMaxFactor", value)
-        _G[self:GetName() .. "Text"]:SetText("Camera distance: " .. string.format("%.1f", value))
-    end)
-    y = y - 58
+    page:Spacer(6)
+    -- The CVar is only taken over once the slider is actually moved, so the
+    -- getter falls back to whatever the client currently has.
+    page:Slider({
+        name = "HKSuiteCameraSlider",
+        label = "Camera distance", min = 1.0, max = 2.6, step = 0.1, width = 240,
+        tooltip = "Maximum camera zoom-out distance (cameraDistanceMaxFactor).",
+        format = function(v) return string.format("%.1f", v) end,
+        get = function()
+            return (type(cfg.cameraFactor) == "number" and cfg.cameraFactor)
+                or tonumber(GetCVar("cameraDistanceMaxFactor")) or 1.0
+        end,
+        set = function(v)
+            cfg.cameraFactor = v
+            SetCVar("cameraDistanceMaxFactor", v)
+        end,
+    })
 
-    Header("Loot")
-    AddOption("Enable fast auto loot",
+    page:Header("Loot")
+    Option("Enable fast auto loot",
         "Instantly loots everything when a corpse or object is opened.", "fastLoot")
-    AddOption("Auto-confirm Bind-on-Pickup loot",
+    Option("Auto-confirm Bind-on-Pickup loot",
         "Automatically confirms the \"this item will bind to you\" loot prompt, regardless of quality.", "autoConfirmBoP")
 
-    Header("Errors")
-    AddOption("Hide on-screen error messages",
+    page:Header("Errors")
+    Option("Hide on-screen error messages",
         "Hides the red error text in the middle of the screen (e.g. \"Not enough rage\", \"Out of range\").", "hideErrors")
-    AddOption("Disable error sounds (cooldown / GCD)",
+    Option("Disable error sounds (cooldown / GCD)",
         "Silences the spoken error sounds played when you use an ability that isn't ready yet or during the global cooldown.", "muteErrorSpeech")
 
-    Header("Auto-dismount")
-    AddOption("Dismount when using an action",
+    page:Header("Auto-dismount")
+    Option("Dismount when using an action",
         "Automatically dismount when you cast a spell or use an item while mounted (never while flying).", "dismountOnAction")
-    AddOption("Dismount at flight masters",
+    Option("Dismount at flight masters",
         "Automatically dismount when you open a flight master's map.", "dismountAtFlightMaster")
 
-    Header("Item Deletion")
-    AddOption("Auto-fill \"DELETE\" in deletion prompts",
+    page:Header("Item deletion")
+    Option("Auto-fill \"DELETE\" in deletion prompts",
         "When deleting a quality item that asks you to type DELETE, the word is filled in automatically so you only need to click confirm.", "deleteAutoFill")
-    AddOption("Instant delete (skip the confirmation)",
+    Option("Instant delete (skip the confirmation)",
         "|cffff2020Warning:|r deletes the item immediately with no confirmation dialog at all. Use with care.", "deleteInstant")
-
-    content:SetHeight(-y + 20)
-    InterfaceOptions_AddCategory(panel)
+    page:Hint("Instant delete has no undo. It applies to the deletion prompt only, not to anything you drag out of your bags.")
 end
 
 -- One-time migration of settings from the old standalone Item Deletion module.
@@ -257,7 +227,6 @@ end
 function M:OnInit()
     cfg = ns.GetConfig("system")
     MigrateDelete()
-    BuildOptionsPanel()
     InstallErrorFilter()
 
     -- Instant loot + bind-on-pickup confirmation.

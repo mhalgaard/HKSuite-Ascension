@@ -202,94 +202,16 @@ local function QColor(q)
     return { 1, 1, 1 }
 end
 
-local ddCount = 0
-local function CreateDropdown(parent, width, options, getVal, setVal)
-    ddCount = ddCount + 1
-    local dd = CreateFrame("Frame", "HKSuiteLootDD" .. ddCount, parent, "UIDropDownMenuTemplate")
-    UIDropDownMenu_SetWidth(dd, width)
-    local labelMap = {}
-    for _, o in ipairs(options) do labelMap[o[1]] = o[2] end
-    UIDropDownMenu_SetText(dd, labelMap[getVal()] or options[1][2])
-    UIDropDownMenu_Initialize(dd, function(self, level)
-        for _, o in ipairs(options) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = o[2]
-            info.value = o[1]
-            info.checked = (getVal() == o[1])
-            info.func = function(btn)
-                setVal(btn.value)
-                UIDropDownMenu_SetText(dd, labelMap[btn.value])
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-    return dd
-end
-
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Loot Auto Roller"
-    panel.parent = "HKSuite"
-
-    -- Scrollable content (there are a lot of controls).
-    local scroll = CreateFrame("ScrollFrame", "HKSuiteLootScroll", panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 8, -8)
-    scroll:SetPoint("BOTTOMRIGHT", -28, 8)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(520, 860)
-    scroll:SetScrollChild(content)
-
-    local COLX = { 12, 175, 338 }   -- 3 columns
-    local y = -8
-
-    local function Title(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        fs:SetPoint("TOPLEFT", COLX[1] - 4, y)
-        fs:SetText(text)
-        y = y - 30
-    end
-    local function Header(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", COLX[1] - 4, y)
-        fs:SetText("|cffffd100" .. text .. "|r")
-        y = y - 22
-    end
-    local function SubHeader(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        fs:SetPoint("TOPLEFT", COLX[1] + 6, y)
-        fs:SetText("|cffbbbbbb" .. text .. "|r")
-        y = y - 18
-    end
-    local function Note(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        fs:SetPoint("TOPLEFT", COLX[1], y)
-        fs:SetWidth(500)
-        fs:SetJustifyH("LEFT")
-        fs:SetText(text)
-        y = y - 34
-    end
+function M:BuildSettings(page)
     local function Check(label, tip, key)
-        local cb = ns.CreateCheck(content, label, tip, cfg[key])
-        cb:SetPoint("TOPLEFT", COLX[1] - 4, y)
-        cb:SetScript("OnClick", function(self) cfg[key] = self:GetChecked() and true or false end)
-        y = y - 26
-    end
-    -- Place a row of up to 3 labeled dropdowns; each item = {label,color,options,get,set}.
-    local function Row(items)
-        for i, it in ipairs(items) do
-            local x = COLX[i]
-            local lbl = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-            lbl:SetPoint("TOPLEFT", x + 18, y)
-            lbl:SetText(it.label)
-            if it.color then lbl:SetTextColor(it.color[1], it.color[2], it.color[3]) end
-            local dd = CreateDropdown(content, 84, it.options, it.get, it.set)
-            dd:SetPoint("TOPLEFT", x, y - 15)
-        end
-        y = y - 54
+        page:Check({
+            label = label, tooltip = tip,
+            get = function() return cfg[key] end,
+            set = function(v) cfg[key] = v end,
+        })
     end
 
-    -- Helpers to build per-table dropdown entries.
+    -- Grid entries: one labelled dropdown per quality / per specific item type.
     local function qEntry(tbl, q, opts)
         return {
             label = QUALITY_LABEL[q], color = QColor(q), options = opts,
@@ -299,13 +221,11 @@ local function BuildOptionsPanel()
     end
     local function itemEntry(e)
         return {
-            label = e.label, color = { 1, 1, 1 }, options = OVR_OPTS,
+            label = e.label, options = OVR_OPTS,
             get = function() return cfg.items[e.key] end,
             set = function(v) cfg.items[e.key] = v end,
         }
     end
-
-    Title("Loot Auto Roller")
 
     Check("Also auto-roll on Bind-on-Pickup items",
         "When off, BoP items are left for you to roll manually.", "rollOnBoP")
@@ -316,22 +236,31 @@ local function BuildOptionsPanel()
     Check("Skip bind-on-pickup roll confirmation",
         "Automatically confirm the BoP prompt for rolls this addon casts.", "skipBoPConfirm")
 
-    Header("Items by Quality")
-    Row({ qEntry(cfg.quality, 2, BASE_OPTS), qEntry(cfg.quality, 3, BASE_OPTS), qEntry(cfg.quality, 4, BASE_OPTS) })
-    Row({ qEntry(cfg.quality, 5, BASE_OPTS), qEntry(cfg.quality, 6, BASE_OPTS) })
+    page:Header("Items by quality")
+    page:Grid(3, {
+        qEntry(cfg.quality, 2, BASE_OPTS), qEntry(cfg.quality, 3, BASE_OPTS),
+        qEntry(cfg.quality, 4, BASE_OPTS), qEntry(cfg.quality, 5, BASE_OPTS),
+        qEntry(cfg.quality, 6, BASE_OPTS),
+    })
 
-    Header("Overrides")
-    Note("Options below override the choices above. For example, setting Epic Mystic Scrolls to Need will need them even if Epic is set to something else above.")
+    page:Header("Overrides")
+    page:Text("These override the choices above. Setting Epic Mystic Scrolls to Need, for example, "
+        .. "needs them even when Epic is set to something else.")
 
-    SubHeader("Mystic Scrolls")
-    Row({ qEntry(cfg.mystic, 2, OVR_OPTS), qEntry(cfg.mystic, 3, OVR_OPTS), qEntry(cfg.mystic, 4, OVR_OPTS) })
-    Row({ qEntry(cfg.mystic, 5, OVR_OPTS) })
+    page:Text("Mystic Scrolls")
+    page:Grid(3, {
+        qEntry(cfg.mystic, 2, OVR_OPTS), qEntry(cfg.mystic, 3, OVR_OPTS),
+        qEntry(cfg.mystic, 4, OVR_OPTS), qEntry(cfg.mystic, 5, OVR_OPTS),
+    })
 
-    SubHeader("Worldforged Scrolls")
-    Row({ qEntry(cfg.worldforged, 3, OVR_OPTS), qEntry(cfg.worldforged, 4, OVR_OPTS), qEntry(cfg.worldforged, 5, OVR_OPTS) })
+    page:Text("Worldforged Scrolls")
+    page:Grid(3, {
+        qEntry(cfg.worldforged, 3, OVR_OPTS), qEntry(cfg.worldforged, 4, OVR_OPTS),
+        qEntry(cfg.worldforged, 5, OVR_OPTS),
+    })
 
-    Header("Specific Item Types")
-    -- group entries by section, preserving order
+    page:Header("Specific item types")
+    -- Group by section (raid instance), preserving declaration order.
     local topRow, sections, order = {}, {}, {}
     for _, e in ipairs(SPECIFIC_ITEMS) do
         if e.section then
@@ -344,21 +273,18 @@ local function BuildOptionsPanel()
     do
         local entries = {}
         for _, e in ipairs(topRow) do entries[#entries + 1] = itemEntry(e) end
-        Row(entries)
+        page:Grid(3, entries)
     end
     for _, sec in ipairs(order) do
-        SubHeader(sec)
+        page:Text(sec)
         local entries = {}
         for _, e in ipairs(sections[sec]) do entries[#entries + 1] = itemEntry(e) end
-        Row(entries)
+        page:Grid(3, entries)
     end
-
-    InterfaceOptions_AddCategory(panel)
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("lootroll")
-    BuildOptionsPanel()
 
     local f = CreateFrame("Frame")
     f:RegisterEvent("START_LOOT_ROLL")

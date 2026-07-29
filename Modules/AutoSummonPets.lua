@@ -207,93 +207,60 @@ local function summonOnLogin()
 end
 
 -- ---------------------------------------------------------------- Options UI
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Auto Summon Pets"
-    panel.parent = "HKSuite"
+function M:BuildSettings(page)
+    page:Check({
+        label = "Summon while in combat",
+        tooltip = "Allow summoning premium pets during combat.",
+        get = function() return cfg.summonInCombat end,
+        set = function(v) cfg.summonInCombat = v end,
+    })
+    page:Check({
+        label = "Only summon after a zone change",
+        tooltip = "Avoids re-summoning until you move to a different zone.",
+        get = function() return cfg.noResummon end,
+        set = function(v) cfg.noResummon = v end,
+    })
+    page:Check({
+        label = "Skip Lootbot if Loot-Transfigurator is owned",
+        tooltip = "Removes Lootbot 3000 from the priority when you own the Loot-Transfigurator.",
+        get = function() return cfg.lootTrans end,
+        set = function(v) cfg.lootTrans = v end,
+    })
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Auto Summon Pets")
+    page:Spacer(6)
+    page:Slider({
+        name = "HKSuitePetDelaySlider",
+        label = "Recast delay", min = 0, max = 600, step = 1, width = 240,
+        tooltip = "How long to wait before summoning again.",
+        format = function(v) return v .. "s" end,
+        get = function() return cfg.recastDelay or 8 end,
+        set = function(v) cfg.recastDelay = v end,
+    })
 
-    local combat = ns.CreateCheck(panel, "Summon while in combat",
-        "Allow summoning premium pets during combat.", cfg.summonInCombat)
-    combat:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    combat:SetScript("OnClick", function(self) cfg.summonInCombat = self:GetChecked() and true or false end)
+    page:Input({
+        label = "Safe-zone pet (name)",
+        name = "HKSuitePetSafeZone", width = 200,
+        tooltip = "Summoned instead of the usual priority while resting or AFK in a safe zone.",
+        get = function() return cfg.safeZonePet or "" end,
+        set = function(v) cfg.safeZonePet = v end,
+    })
 
-    local noResum = ns.CreateCheck(panel, "Only summon after a zone change",
-        "Avoids re-summoning until you move to a different zone.", cfg.noResummon)
-    noResum:SetPoint("TOPLEFT", combat, "BOTTOMLEFT", 0, -8)
-    noResum:SetScript("OnClick", function(self) cfg.noResummon = self:GetChecked() and true or false end)
-
-    local lootT = ns.CreateCheck(panel, "Skip Lootbot if Loot-Transfigurator is owned",
-        "Removes Lootbot 3000 from the priority when you own the Loot-Transfigurator.", cfg.lootTrans)
-    lootT:SetPoint("TOPLEFT", noResum, "BOTTOMLEFT", 0, -8)
-    lootT:SetScript("OnClick", function(self) cfg.lootTrans = self:GetChecked() and true or false end)
-
-    local slider = CreateFrame("Slider", "HKSuitePetDelaySlider", panel, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", lootT, "BOTTOMLEFT", 4, -28)
-    slider:SetMinMaxValues(0, 600)
-    slider:SetValueStep(1)
-    slider:SetWidth(220)
-    _G[slider:GetName() .. "Low"]:SetText("0")
-    _G[slider:GetName() .. "High"]:SetText("600")
-    _G[slider:GetName() .. "Text"]:SetText("Recast delay: " .. (cfg.recastDelay or 8) .. "s")
-    slider:SetValue(cfg.recastDelay or 8)
-    slider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
-        cfg.recastDelay = value
-        _G[self:GetName() .. "Text"]:SetText("Recast delay: " .. value .. "s")
-    end)
-
-    local ebLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    ebLabel:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", -4, -24)
-    ebLabel:SetText("Safe-zone pet (name):")
-
-    local eb = CreateFrame("EditBox", "HKSuitePetSafeZone", panel, "InputBoxTemplate")
-    eb:SetSize(180, 20)
-    eb:SetPoint("LEFT", ebLabel, "RIGHT", 12, 0)
-    eb:SetAutoFocus(false)
-    eb:SetText(cfg.safeZonePet or "")
-
-    local function SaveSafeZonePet()
-        cfg.safeZonePet = (eb:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        eb:SetText(cfg.safeZonePet)
-    end
-
-    eb:SetScript("OnEnterPressed", function(self) SaveSafeZonePet(); self:ClearFocus() end)
-    eb:SetScript("OnEditFocusLost", SaveSafeZonePet)
-    eb:SetScript("OnEscapePressed", function(self) self:SetText(cfg.safeZonePet or "") self:ClearFocus() end)
-
-    ns.CreateInlineAccept(eb, SaveSafeZonePet)
-
-    -- Explain the summon priority so it's clear what gets summoned when.
-    local logicHdr = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    logicHdr:SetPoint("TOPLEFT", ebLabel, "BOTTOMLEFT", 0, -20)
-    logicHdr:SetText("|cffffd100Summon priority by situation|r")
-
-    local logic = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    logic:SetPoint("TOPLEFT", logicHdr, "BOTTOMLEFT", 0, -8)
-    logic:SetWidth(520)
-    logic:SetJustifyH("LEFT")
-    logic:SetSpacing(2)
-    logic:SetText(
-        "|cffaaaaaaHighest available pet you own wins; PvP/arena summons nothing.|r\n" ..
+    -- Spell out the priority: which pet you get is otherwise hard to predict.
+    page:Header("Summon priority by situation")
+    page:Text("Highest available pet you own wins; PvP/arena summons nothing.")
+    page:Text(
         "• Manastorm:  Cogsley (Eye of the Manastorm)  >  Lootbot 3000\n" ..
         "• Dungeon (Normal):  Wisdomball (first 15s of the run or right after an LFG completion)  >  Lootbot 3000\n" ..
         "• Raid:  Lootbot 3000\n" ..
         "• Open world:  Lootbot 3000  >  Book of Ascension  >  Treasure Keeper  >  Fix-o-Tron\n" ..
         "• While leveling (before your first LFG completion):  Book of Ascension leads\n" ..
-        "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension\n" ..
-        "|cffaaaaaaWisdomball is only used in Normal dungeons, never Heroic/Mythic.|r"
+        "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension"
     )
-
-    InterfaceOptions_AddCategory(panel)
+    page:Hint("Wisdomball is only used in Normal dungeons, never Heroic/Mythic.")
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("pets")
-    BuildOptionsPanel()
 
     local ev = CreateFrame("Frame")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")

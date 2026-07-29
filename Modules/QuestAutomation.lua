@@ -275,143 +275,102 @@ end
 local BYPASS_KEYS = { "NONE", "SHIFT", "CTRL", "ALT" }
 local BYPASS_LABEL = { NONE = "None", SHIFT = "Shift", CTRL = "Ctrl", ALT = "Alt" }
 
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Quest Automation"
-    panel.parent = "HKSuite"   -- nest under the Overview page
+function M:BuildSettings(page)
+    page:Header("Quest givers")
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Quest Automation")
+    page:Check({
+        label = "Auto-accept quests",
+        tooltip = "Automatically accept quests offered by NPCs (including shared/escort confirmations).",
+        get = function() return cfg.autoAccept end,
+        set = function(v) cfg.autoAccept = v end,
+    })
 
-    local accept = ns.CreateCheck(panel, "Auto-accept quests",
-        "Automatically accept quests offered by NPCs (including shared/escort confirmations).",
-        cfg.autoAccept)
-    accept:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    accept:SetScript("OnClick", function(self)
-        cfg.autoAccept = self:GetChecked() and true or false
-    end)
+    -- Turn-in and reward selection depend on each other: picking a reward implies
+    -- handing the quest in, and switching hand-in off drops reward selection too.
+    local turnIn, reward
 
-    local turnIn = ns.CreateCheck(panel, "Auto turn in quests",
-        "Automatically hand in completed quests. On quests with a choice of rewards, waits for you to pick unless the sub-option below is enabled.",
-        cfg.autoTurnIn)
-    turnIn:SetPoint("TOPLEFT", accept, "BOTTOMLEFT", 0, -8)
+    turnIn = page:Check({
+        label = "Auto turn in quests",
+        tooltip = "Automatically hand in completed quests. On quests with a choice of rewards, waits for you to pick unless the sub-option below is enabled.",
+        get = function() return cfg.autoTurnIn end,
+        set = function(v) cfg.autoTurnIn = v end,
+        onChange = function(on)
+            if not on then cfg.autoSelectReward = false end
+            reward:Refresh()
+        end,
+    })
 
-    local reward = ns.CreateCheck(panel, "Auto-select most valuable reward",
-        "On quests with multiple reward choices, automatically pick the highest vendor-value reward. Enabling this also enables Auto turn in.",
-        cfg.autoSelectReward)
-    reward:SetPoint("TOPLEFT", turnIn, "BOTTOMLEFT", 20, -2)
+    reward = page:Check({
+        label = "Auto-select most valuable reward", indent = true,
+        tooltip = "On quests with multiple reward choices, automatically pick the highest vendor-value reward. Enabling this also enables Auto turn in.",
+        get = function() return cfg.autoSelectReward end,
+        set = function(v) cfg.autoSelectReward = v end,
+        onChange = function(on)
+            if on then cfg.autoTurnIn = true end
+            turnIn:Refresh()
+            turnIn:RefreshChildren()
+        end,
+    })
+    turnIn:BindChildren({ reward })
 
-    local function RefreshChild()
-        reward.label:SetTextColor(cfg.autoTurnIn and 1 or 0.5,
-                                  cfg.autoTurnIn and 1 or 0.5,
-                                  cfg.autoTurnIn and 1 or 0.5)
-    end
+    page:Check({
+        label = "Also open quests already in your log",
+        tooltip = "Lowest priority. After completed hand-ins and new quests are dealt with, open a quest you're already on (shows its progress text). Leave off if quest givers double as vendors.",
+        get = function() return cfg.autoOpenInProgress end,
+        set = function(v) cfg.autoOpenInProgress = v end,
+    })
 
-    turnIn:SetScript("OnClick", function(self)
-        local on = self:GetChecked() and true or false
-        cfg.autoTurnIn = on
-        if not on then
-            cfg.autoSelectReward = false
-            reward:SetChecked(false)
-        end
-        RefreshChild()
-    end)
+    page:Check({
+        label = "Auto-skip single gossip option",
+        tooltip = "When an NPC greets you with just one gossip option and no quests to handle, select it automatically to skip the talk menu.",
+        get = function() return cfg.autoSkipGossip end,
+        set = function(v) cfg.autoSkipGossip = v end,
+    })
 
-    reward:SetScript("OnClick", function(self)
-        local on = self:GetChecked() and true or false
-        cfg.autoSelectReward = on
-        if on then
-            cfg.autoTurnIn = true
-            turnIn:SetChecked(true)
-        end
-        RefreshChild()
-    end)
+    page:Header("Exceptions")
 
-    RefreshChild()
+    page:Check({
+        label = "Don't auto-accept daily quests",
+        tooltip = "Skips auto-accepting quests flagged as daily. You can still accept them manually.",
+        get = function() return cfg.skipDailies end,
+        set = function(v) cfg.skipDailies = v end,
+    })
 
-    local inProgress = ns.CreateCheck(panel, "Also open quests already in your log",
-        "Lowest priority. After completed hand-ins and new quests are dealt with, open a quest you're already on (shows its progress text). Leave off if quest givers double as vendors.",
-        cfg.autoOpenInProgress)
-    inProgress:SetPoint("TOPLEFT", reward, "BOTTOMLEFT", -20, -8)  -- back to base indent
-    inProgress:SetScript("OnClick", function(self)
-        cfg.autoOpenInProgress = self:GetChecked() and true or false
-    end)
+    page:Check({
+        label = "Auto-accept callboard / command board quests",
+        tooltip = "By default, quests from the callboard / command board are NOT auto-accepted. Enable this to auto-accept them too.",
+        get = function() return cfg.autoAcceptCallboard end,
+        set = function(v) cfg.autoAcceptCallboard = v end,
+    })
 
-    local skipGossip = ns.CreateCheck(panel, "Auto-skip single gossip option",
-        "When an NPC greets you with just one gossip option and no quests to handle, select it automatically to skip the talk menu.",
-        cfg.autoSkipGossip)
-    skipGossip:SetPoint("TOPLEFT", inProgress, "BOTTOMLEFT", 0, -8)
-    skipGossip:SetScript("OnClick", function(self)
-        cfg.autoSkipGossip = self:GetChecked() and true or false
-    end)
+    page:Header("Sharing")
 
-    local skipDaily = ns.CreateCheck(panel, "Don't auto-accept daily quests",
-        "Skips auto-accepting quests flagged as daily. You can still accept them manually.",
-        cfg.skipDailies)
-    skipDaily:SetPoint("TOPLEFT", skipGossip, "BOTTOMLEFT", 0, -8)
-    skipDaily:SetScript("OnClick", function(self)
-        cfg.skipDailies = self:GetChecked() and true or false
-    end)
+    local share = page:Check({
+        label = "Auto-share quests with your party",
+        tooltip = "When you accept a quest, automatically share it with your party (only quests that can be shared).",
+        get = function() return cfg.autoShareQuests end,
+        set = function(v) cfg.autoShareQuests = v end,
+    })
+    share:BindChildren({
+        page:Check({
+            label = "Party only — never share in a raid", indent = true,
+            tooltip = "Only auto-share while in a normal party. In a raid group, quests are never shared automatically.",
+            get = function() return cfg.shareOnlyInParty end,
+            set = function(v) cfg.shareOnlyInParty = v end,
+        }),
+    })
 
-    local callboard = ns.CreateCheck(panel, "Auto-accept callboard / command board quests",
-        "By default, quests from the callboard / command board are NOT auto-accepted. Enable this to auto-accept them too.",
-        cfg.autoAcceptCallboard)
-    callboard:SetPoint("TOPLEFT", skipDaily, "BOTTOMLEFT", 0, -8)
-    callboard:SetScript("OnClick", function(self)
-        cfg.autoAcceptCallboard = self:GetChecked() and true or false
-    end)
+    page:Header("Override")
 
-    local share = ns.CreateCheck(panel, "Auto-share quests with your party",
-        "When you accept a quest, automatically share it with your party (only quests that can be shared).",
-        cfg.autoShareQuests)
-    share:SetPoint("TOPLEFT", callboard, "BOTTOMLEFT", 0, -8)
-
-    local partyOnly = ns.CreateCheck(panel, "Party only — never share in a raid",
-        "Only auto-share while in a normal party. In a raid group, quests are never shared automatically.",
-        cfg.shareOnlyInParty)
-    partyOnly:SetPoint("TOPLEFT", share, "BOTTOMLEFT", 20, -2)
-
-    local function RefreshShareChild()
-        local on = cfg.autoShareQuests
-        partyOnly.label:SetTextColor(on and 1 or 0.5, on and 1 or 0.5, on and 1 or 0.5)
-    end
-
-    share:SetScript("OnClick", function(self)
-        cfg.autoShareQuests = self:GetChecked() and true or false
-        RefreshShareChild()
-    end)
-
-    partyOnly:SetScript("OnClick", function(self)
-        cfg.shareOnlyInParty = self:GetChecked() and true or false
-    end)
-
-    RefreshShareChild()
-
-    local bypassLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    bypassLabel:SetPoint("TOPLEFT", partyOnly, "BOTTOMLEFT", -20, -18)
-    bypassLabel:SetText("Hold key to pause automation:")
-
-    local dropdown = CreateFrame("Frame", "HKSuiteBypassDropdown", panel, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("TOPLEFT", bypassLabel, "BOTTOMLEFT", -16, -4)
-    UIDropDownMenu_SetWidth(dropdown, 90)
-    UIDropDownMenu_SetText(dropdown, BYPASS_LABEL[cfg.bypassModifier] or "None")
-    UIDropDownMenu_Initialize(dropdown, function(self, level)
-        for _, k in ipairs(BYPASS_KEYS) do
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = BYPASS_LABEL[k]
-            info.value = k
-            info.checked = (cfg.bypassModifier == k)
-            info.func = function(button)
-                cfg.bypassModifier = button.value
-                UIDropDownMenu_SetText(dropdown, BYPASS_LABEL[button.value])
-                CloseDropDownMenus()
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-
-    InterfaceOptions_AddCategory(panel)
+    local options = {}
+    for _, k in ipairs(BYPASS_KEYS) do options[#options + 1] = { k, BYPASS_LABEL[k] } end
+    page:Dropdown({
+        label = "Hold key to pause automation",
+        options = options, width = 130,
+        tooltip = "While this key is held, none of the automation above runs -- handy when a quest giver also sells things.",
+        get = function() return cfg.bypassModifier end,
+        set = function(v) cfg.bypassModifier = v end,
+    })
 end
 
 function M:OnInit()
@@ -430,5 +389,4 @@ function M:OnInit()
         end
     end)
 
-    BuildOptionsPanel()
 end

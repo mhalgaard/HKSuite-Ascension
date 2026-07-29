@@ -125,78 +125,51 @@ local function RemoveChannels()
 end
 
 -- --------------------------------------------------------------- options UI
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "Chat Filters"
-    panel.parent = "HKSuite"
-
-    local scroll = CreateFrame("ScrollFrame", "HKSuiteFilterScroll", panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 8, -8)
-    scroll:SetPoint("BOTTOMRIGHT", -28, 8)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(520, 720)
-    scroll:SetScrollChild(content)
-
+function M:BuildSettings(page)
     local checks = {}
-    local y = -8
 
-    local function Title(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        fs:SetPoint("TOPLEFT", 12, y); fs:SetText(text); y = y - 28
-    end
-    local function Header(text)
-        local fs = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-        fs:SetPoint("TOPLEFT", 12, y); fs:SetText("|cffffd100" .. text .. "|r"); y = y - 22
-    end
     local function Add(f, onChange)
-        local cb = ns.CreateCheck(content, f.label, nil, cfg[f.key])
-        cb:SetPoint("TOPLEFT", 12, y)
-        cb:SetScript("OnClick", function(self)
-            cfg[f.key] = self:GetChecked() and true or false
-            if onChange then onChange() end
-        end)
-        checks[f.key] = cb
-        y = y - 24
+        checks[#checks + 1] = page:Check({
+            label = f.label,
+            get = function() return cfg[f.key] end,
+            set = function(v) cfg[f.key] = v end,
+            onChange = onChange,
+        })
     end
+
     local function RefreshChecks()
-        for key, cb in pairs(checks) do cb:SetChecked(cfg[key]) end
+        for _, cb in ipairs(checks) do cb:Refresh() end
     end
 
-    Title("Chat Filters")
+    page:Row({
+        { text = "All on", width = 100, onClick = function()
+            for _, k in ipairs(ALL_KEYS) do cfg[k] = true end
+            RefreshChecks()
+            RemoveChannels()
+        end },
+        { text = "All off", width = 100, onClick = function()
+            for _, k in ipairs(ALL_KEYS) do cfg[k] = false end
+            RefreshChecks()
+        end },
+    })
 
-    local allOn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    allOn:SetSize(90, 22); allOn:SetText("All on"); allOn:SetPoint("TOPLEFT", 12, y)
-    allOn:SetScript("OnClick", function()
-        for _, k in ipairs(ALL_KEYS) do cfg[k] = true end
-        RefreshChecks(); RemoveChannels()
-    end)
-    local allOff = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    allOff:SetSize(90, 22); allOff:SetText("All off"); allOff:SetPoint("LEFT", allOn, "RIGHT", 8, 0)
-    allOff:SetScript("OnClick", function()
-        for _, k in ipairs(ALL_KEYS) do cfg[k] = false end
-        RefreshChecks()
-    end)
-    y = y - 30
-
-    Header("Rest areas")
+    page:Header("Rest areas")
     for _, f in ipairs(REST_FILTERS) do Add(f) end
 
-    Header("System broadcasts")
+    page:Header("System broadcasts")
     for _, f in ipairs(SYSTEM_FILTERS) do Add(f) end
 
-    Header("Channel spam")
+    page:Header("Channel spam")
     for _, f in ipairs(CHANNEL_FILTERS) do Add(f) end
 
-    Header("Default chat tab")
+    page:Header("Default chat tab")
     for _, f in ipairs(REMOVE_CHANNELS) do Add(f, RemoveChannels) end
-
-    content:SetHeight(-y + 20)
-    InterfaceOptions_AddCategory(panel)
+    page:Hint("Leaving a channel takes effect straight away; re-joining one needs a reload "
+        .. "(or the client will re-add it at the next login).")
 end
 
 function M:OnInit()
     cfg = ns.GetConfig("chatfilter")
-    BuildOptionsPanel()
 
     ChatFrame_AddMessageEventFilter("CHAT_MSG_SYSTEM", FilterSystem)
     ChatFrame_AddMessageEventFilter("CHAT_MSG_SAY", FilterSayYell)

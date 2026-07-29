@@ -2,11 +2,11 @@ local ADDON, ns = ...
 
 -- =============================================================================
 -- UI Features module: small on-screen combat helpers.
---   * In-range tracker  — a crosshair over the character, white when the target
+--   * In-range tracker  â€” a crosshair over the character, white when the target
 --     is in melee range, red when it's out of range.
---   * Trinket tracker   — a movable box showing your equipped trinkets and their
+--   * Trinket tracker   â€” a movable box showing your equipped trinkets and their
 --     cooldowns (move with Ctrl + left-drag).
---   * Loot rolls        — a "Loot Rolls" section in the objectives tracker
+--   * Loot rolls        â€” a "Loot Rolls" section in the objectives tracker
 --     listing recently rolled items, expandable to each player's choice.
 -- =============================================================================
 
@@ -952,202 +952,133 @@ local function BuildLootRollsFrame()
 end
 
 -- ------------------------------------------------------------------- options
-local function BuildOptionsPanel()
-    local panel = CreateFrame("Frame")
-    panel.name = "UI Features"
-    panel.parent = "HKSuite"
+function M:BuildSettings(page)
+    page:Header("In-range tracker")
+    page:Check({
+        label = "Enable in-range tracker",
+        tooltip = "Shows a crosshair over your character: white when your target is in melee range, red when out of range.",
+        get = function() return cfg.rangeTracker end,
+        set = function(v) cfg.rangeTracker = v end,
+    })
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("UI Features")
-
-    local range = ns.CreateCheck(panel, "Enable in-range tracker",
-        "Shows a crosshair over your character: white when your target is in melee range, red when out of range.",
-        cfg.rangeTracker)
-    range:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    range:SetScript("OnClick", function(self)
-        cfg.rangeTracker = self:GetChecked() and true or false
-    end)
-
-    local spellLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    spellLabel:SetPoint("TOPLEFT", range, "BOTTOMLEFT", 24, -6)
-    spellLabel:SetText("Melee ability for range check (optional — auto-detected if blank):")
-
-    local spellBox = CreateFrame("EditBox", "HKSuiteRangeSpellBox", panel, "InputBoxTemplate")
-    spellBox:SetSize(200, 20)
-    spellBox:SetAutoFocus(false)
-    spellBox:SetPoint("TOPLEFT", spellLabel, "BOTTOMLEFT", 4, -8)
-    spellBox:SetText(cfg.rangeSpell or "")
-
-    local savedLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    local function RefreshSaved()
+    local saved
+    local function SavedText()
         local v = cfg.rangeSpell
-        if v and v ~= "" then
-            savedLabel:SetText("Saved: |cff00ff00" .. v .. "|r")
-        else
-            savedLabel:SetText("Saved: |cffaaaaaa(auto-detect)|r")
-        end
+        if v and v ~= "" then return "Using: |cff00ff00" .. v .. "|r" end
+        return "Using: |cffaaaaaa(auto-detected from the melee abilities you know)|r"
     end
 
-    local function ApplySpell(name)
-        cfg.rangeSpell = (name or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        cachedSpell = nil            -- force re-resolve with the new preference
-        spellBox:SetText(cfg.rangeSpell)
-        RefreshSaved()
-    end
-    local function SaveSpell() ApplySpell(spellBox:GetText()) end
+    local spell = page:Input({
+        label = "Melee ability for the range check (optional)",
+        name = "HKSuiteRangeSpellBox", width = 220,
+        tooltip = "Ascension is classless, so with this blank the tracker probes a list of real "
+            .. "5-yard melee abilities and uses whichever one you actually know.",
+        get = function() return cfg.rangeSpell or "" end,
+        set = function(v)
+            cfg.rangeSpell = v
+            cachedSpell = nil          -- force a re-resolve with the new preference
+        end,
+        onChange = function() if saved then saved:SetText(SavedText()) end end,
+    })
 
-    spellBox:SetScript("OnEnterPressed", function(self) SaveSpell(); self:ClearFocus() end)
-    spellBox:SetScript("OnEditFocusLost", SaveSpell)
-    spellBox:SetScript("OnEscapePressed", function(self)
-        self:SetText(cfg.rangeSpell or ""); self:ClearFocus()
-    end)
+    saved = page:Hint(SavedText())
 
-    local okBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    okBtn:SetSize(48, 22)
-    okBtn:SetPoint("LEFT", spellBox, "RIGHT", 8, 0)
-    okBtn:SetText("OK")
-    okBtn:SetScript("OnClick", function() SaveSpell(); spellBox:ClearFocus() end)
+    -- Setting it from the last ability you cast is the reliable route: the
+    -- spellbook can't be open while these settings are, so shift-clicking a spell
+    -- into the box usually isn't possible.
+    page:Button({
+        text = "Set from last-used ability", width = 220,
+        tooltip = "Cast your melee ability once, then click this.",
+        onClick = function()
+            if lastCastSpell and lastCastSpell ~= "" then
+                cfg.rangeSpell = lastCastSpell
+                cachedSpell = nil
+                spell:Refresh()
+                saved:SetText(SavedText())
+                ns.Print("Range ability set to: " .. lastCastSpell)
+            else
+                ns.Print("Cast your melee ability once, then click 'Set from last-used ability'.")
+            end
+        end,
+    })
 
-    savedLabel:SetPoint("TOPLEFT", spellBox, "BOTTOMLEFT", 0, -6)
-    RefreshSaved()
-
-    -- Reliable capture: set to the last ability you cast. (The Blizzard spellbook
-    -- can't be open at the same time as this options panel, which is why
-    -- shift-clicking a spell here usually can't work.)
-    local lastBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    lastBtn:SetSize(190, 22)
-    lastBtn:SetPoint("TOPLEFT", savedLabel, "BOTTOMLEFT", 0, -6)
-    lastBtn:SetText("Set from last-used ability")
-    lastBtn:SetScript("OnClick", function()
-        if lastCastSpell and lastCastSpell ~= "" then
-            ApplySpell(lastCastSpell)
-            ns.Print("Range ability set to: " .. lastCastSpell)
-        else
-            ns.Print("Cast your melee ability once, then click 'Set from last-used ability'.")
-        end
-    end)
-
-    -- Also accept a Shift-clicked spell link if the box has focus (works with a
-    -- standalone spell list; the default spellbook closes this panel).
+    -- Now that settings live in their own window the spellbook can be open at the
+    -- same time, so shift-clicking a spell into the box finally works.
     hooksecurefunc("ChatEdit_InsertLink", function(link)
-        if link and spellBox:HasFocus() then
-            ApplySpell(tostring(link):match("%[(.-)%]") or tostring(link))
+        if link and spell.box:HasFocus() then
+            cfg.rangeSpell = tostring(link):match("%[(.-)%]") or tostring(link)
+            cachedSpell = nil
+            spell:Refresh()
+            saved:SetText(SavedText())
         end
     end)
 
-    local tipShift = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    tipShift:SetPoint("TOPLEFT", lastBtn, "BOTTOMLEFT", 0, -6)
-    tipShift:SetText("Type the exact ability name and click OK, or use the button above.")
+    page:OnRefresh(function() saved:SetText(SavedText()) end)
 
-    local trinket = ns.CreateCheck(panel, "Enable trinket tracker",
-        "Shows your equipped trinkets and their cooldowns in a box. Hold Ctrl and left-drag to move it.",
-        cfg.trinketTracker)
-    trinket:SetPoint("TOPLEFT", tipShift, "BOTTOMLEFT", -28, -14)
-    trinket:SetScript("OnClick", function(self)
-        cfg.trinketTracker = self:GetChecked() and true or false
-        UpdateTrinkets()
-    end)
+    page:Header("Trinket tracker")
+    page:Check({
+        label = "Enable trinket tracker",
+        tooltip = "Shows your equipped trinkets and their cooldowns in a box.",
+        get = function() return cfg.trinketTracker end,
+        set = function(v) cfg.trinketTracker = v end,
+        onChange = UpdateTrinkets,
+    })
+    page:Hint("Hold Ctrl and left-drag the trinket box to reposition it.")
 
-    local hint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", trinket, "BOTTOMLEFT", 20, -6)
-    hint:SetText("Tip: hold Ctrl + left-click and drag the trinket box to reposition it.")
+    page:Header("Loot rolls")
+    page:Text("Adds a Loot Rolls section to the objectives frame listing the items your group most "
+        .. "recently rolled on. Click an item to see every player's choice. Rolls that are still open "
+        .. "stay expanded so you can see who has not answered yet; otherwise the roll that finished "
+        .. "most recently is the one shown expanded.")
 
-    -- ---- second column: loot rolls ----
-    local lrTitle = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    lrTitle:SetPoint("TOPLEFT", title, "TOPLEFT", 300, 0)
-    lrTitle:SetText("Loot Rolls")
+    page:Check({
+        label = "Show the loot rolls list",
+        tooltip = "Lists recent group loot rolls in the objectives frame.",
+        get = function() return cfg.lootRolls end,
+        set = function(v) cfg.lootRolls = v end,
+        onChange = RefreshLootRolls,
+    })
 
-    local lrIntro = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    lrIntro:SetPoint("TOPLEFT", lrTitle, "BOTTOMLEFT", 0, -8)
-    lrIntro:SetWidth(280)
-    lrIntro:SetJustifyH("LEFT")
-    lrIntro:SetText("Adds a Loot Rolls section to the objectives frame listing the items your group "
-        .. "most recently rolled on. Click an item to see every player's choice.")
-
-    local lrOn = ns.CreateCheck(panel, "Show the loot rolls list",
-        "Lists recent group loot rolls in the objectives frame.\n\n"
-        .. "Rolls that are still open stay expanded so you can see who has not answered yet; "
-        .. "otherwise the roll that finished most recently is the one shown expanded.",
-        cfg.lootRolls)
-    lrOn:SetPoint("TOPLEFT", lrIntro, "BOTTOMLEFT", -4, -10)
-    lrOn:SetScript("OnClick", function(self)
-        cfg.lootRolls = self:GetChecked() and true or false
-        RefreshLootRolls()
-    end)
-
-    local lrAttach = ns.CreateCheck(panel, "Attach to objectives frame",
-        "On: the list sits at the top of the quest tracker and pushes your quests down.\n\n"
-        .. "Off: the list becomes a free-floating box you can move with Ctrl + left-drag.",
-        cfg.lootRollsAttach)
-    lrAttach:SetPoint("TOPLEFT", lrOn, "BOTTOMLEFT", 0, -2)
-    lrAttach:SetScript("OnClick", function(self)
-        cfg.lootRollsAttach = self:GetChecked() and true or false
-        PushTracker(0)          -- give the tracker its space back before re-anchoring
-        RefreshLootRolls()
-    end)
-
-    local lrPass = ns.CreateCheck(panel, "List players who passed",
-        "When off, players who passed are left out of the expanded list (they still count "
-        .. "towards the answered total).",
-        cfg.lootRollsShowPass)
-    lrPass:SetPoint("TOPLEFT", lrAttach, "BOTTOMLEFT", 0, -2)
-    lrPass:SetScript("OnClick", function(self)
-        cfg.lootRollsShowPass = self:GetChecked() and true or false
-        RefreshLootRolls()
-    end)
-
-    -- Two small numeric inputs, laid out the same way as the Rolling module's.
-    local function NumberBox(name, label, tip, key, min, max, anchor, yOff)
-        local lbl = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-        lbl:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 4, yOff)
-        lbl:SetText(label)
-
-        local box = CreateFrame("EditBox", name, panel, "InputBoxTemplate")
-        box:SetSize(76, 20)
-        box:SetAutoFocus(false)
-        box:SetPoint("TOPLEFT", lbl, "BOTTOMLEFT", 4, -6)
-        box:SetText(tostring(cfg[key] or min))
-
-        local function Save()
-            local v = tonumber((box:GetText() or ""):match("%d+") or "") or min
-            if v < min then v = min elseif v > max then v = max end
-            cfg[key] = v
-            box:SetText(tostring(v))
+    page:Check({
+        label = "Attach to the objectives frame",
+        tooltip = "On: the list sits at the top of the quest tracker and pushes your quests down.\n\n"
+            .. "Off: the list becomes a free-floating box you can move with Ctrl + left-drag.",
+        get = function() return cfg.lootRollsAttach end,
+        set = function(v) cfg.lootRollsAttach = v end,
+        onChange = function()
+            PushTracker(0)          -- give the tracker its space back before re-anchoring
             RefreshLootRolls()
-        end
-        box:SetScript("OnEnterPressed", function(self) Save(); self:ClearFocus() end)
-        box:SetScript("OnEditFocusLost", Save)
-        box:SetScript("OnEscapePressed", function(self)
-            self:SetText(tostring(cfg[key] or min)); self:ClearFocus()
-        end)
-        ns.CreateInlineAccept(box, Save)
-        if tip then
-            box:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText(tip, nil, nil, nil, nil, true)
-                GameTooltip:Show()
-            end)
-            box:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        end
-        return box
-    end
+        end,
+    })
 
-    local maxBox = NumberBox("HKSuiteLootRollsMaxBox", "Items to list:",
-        "How many of the most recent items the section shows.",
-        "lootRollsMax", 1, 10, lrPass, -8)
+    page:Check({
+        label = "List players who passed",
+        tooltip = "When off, players who passed are left out of the expanded list. They still count "
+            .. "towards the answered total.",
+        get = function() return cfg.lootRollsShowPass end,
+        set = function(v) cfg.lootRollsShowPass = v end,
+        onChange = RefreshLootRolls,
+    })
 
-    NumberBox("HKSuiteLootRollsHideBox", "Hide after last roll (seconds, 0 = never):",
-        "The section disappears once the newest roll has been finished for this long.",
-        "lootRollsHideAfter", 0, 3600, maxBox, -10)
+    page:Input({
+        label = "Items to list", width = 80,
+        name = "HKSuiteLootRollsMaxBox",
+        tooltip = "How many of the most recent items the section shows.",
+        numeric = true, min = 1, max = 10, step = 1,
+        get = function() return cfg.lootRollsMax end,
+        set = function(v) cfg.lootRollsMax = v end,
+        onChange = RefreshLootRolls,
+    })
 
-    panel:SetScript("OnShow", function()
-        lrOn:SetChecked(cfg.lootRolls)
-        lrAttach:SetChecked(cfg.lootRollsAttach)
-        lrPass:SetChecked(cfg.lootRollsShowPass)
-    end)
-
-    InterfaceOptions_AddCategory(panel)
+    page:Input({
+        label = "Hide the list this long after the last roll (seconds, 0 = never)", width = 80,
+        name = "HKSuiteLootRollsHideBox",
+        tooltip = "The section disappears once the newest roll has been finished for this long.",
+        numeric = true, min = 0, max = 3600, step = 1,
+        get = function() return cfg.lootRollsHideAfter end,
+        set = function(v) cfg.lootRollsHideAfter = v end,
+        onChange = RefreshLootRolls,
+    })
 end
 
 function M:OnInit()
@@ -1157,7 +1088,6 @@ function M:OnInit()
     BuildTrinketBox()
     CompileLootPatterns()
     BuildLootRollsFrame()
-    BuildOptionsPanel()
 
     -- Loot rolls: START_LOOT_ROLL gives us the item, the chat traffic gives us
     -- the answers, CANCEL_LOOT_ROLL tells us the roll is over.
