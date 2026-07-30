@@ -30,12 +30,12 @@ apply after a reload.
 | Module | Default | Summary |
 |---|---|---|
 | Quest Automation | On | Auto accept / turn in / reward pick / gossip skip; daily & callboard toggles |
-| Automation | On *(actions off)* | Auto-release after death (BG/world/dungeon) and auto-sell junk at vendors |
+| Automation | On *(actions off)* | Auto-release after death (BG/world/dungeon), auto-sell junk and auto-repair at vendors |
 | Social | On | Class colors, chat tabs, World channel, group-invite automation |
 | System | On | Screen/weather/loot tweaks, camera, error hiding, auto-dismount, item deletion |
 | Chat Filters | On *(filters off)* | Hide Ascension broadcast & channel spam |
 | Clear Quests | On | Abandon unwanted quests, keeping the ones you choose |
-| UI Features | On *(features off)* | In-range crosshair and a movable trinket cooldown tracker |
+| UI Features | On *(features off)* | In-range crosshair, trinket cooldown tracker, on-screen stat readout, loot rolls under the objectives frame |
 | Addon Button | On | Consolidate minimap buttons into one HK flyout |
 | Auto-Grab Vanity | On | Collect & tidy up vanity-collection items |
 | Loot Auto Roller | Off | Auto-roll on group loot, by item quality |
@@ -79,12 +79,23 @@ A **bypass key** (default: Shift) pauses all quest automation while held.
 
 | Option | Default | What it does |
 |---|---|---|
-| Auto sell items when visiting a vendor | Off | On merchant open, sells the qualities selected below plus anything whitelisted. |
+| Auto sell items when visiting a vendor | Off | On merchant open, sells the qualities selected below, minus anything a rule below or the never-sell list holds back. |
 | └ Poor / Common / Uncommon / Rare / Epic | Poor + Common on | Per-quality sell toggles. |
+| └ Collect the appearance before selling | Off | For each item the filter picked out, collects its transmog appearance first if you don't have it yet (confirming the dialog for you), then sells. Items the filter wouldn't sell are never collected; an item whose appearance can't be collected is left in your bags. |
+| └ Never sell realm bound items | **On** | Protects anything whose tooltip says Realm Bound. |
+| └ Never sell worldforged items | **On** | Protects anything whose tooltip says Worldforged. |
 | └ Never sell trade goods / crafting materials | **On** | Protects ore, herbs, cloth, leather, enchanting mats and other Trade Goods / reagents from the quality rules. |
+| &nbsp;&nbsp;&nbsp;&nbsp;└ …except Cloth / Leather / Metal & stone / Herbs / Meat / Enchanting / Elemental | All off | Tick a sub-category to sell it anyway. Matched by item sub-class, so it covers the whole category. |
 | └ Never sell gemstones | **On** | Protects gems and pearls (Star Ruby, Small Lustrous Pearl, cut and uncut gems), matched by item class. |
 | └ Never sell elixirs from level *N* | **On**, level 30 | Protects elixirs requiring at least level *N*, so low-level leftovers still sell. Flasks and potions aren't covered. |
-| Always-sell whitelist | — | Item names or IDs (one per line) to always sell, regardless of quality — this overrides every protection above. |
+| Never-sell list | — | Item names or IDs (one per line) that are never sold, whatever the quality rules say. Click into the box and **shift-click** an item to add it by name. |
+
+**Auto repair at vendors:**
+
+| Option | Default | What it does |
+|---|---|---|
+| Auto repair when visiting a vendor | Off | Repairs all gear at merchants that can repair. Runs after auto-sell, so the proceeds help pay for it. |
+| └ Use guild funds when available | **On** | Pays from the guild bank's repair allowance when your rank has one and it covers the bill; otherwise your own money is used. |
 </details>
 
 <details>
@@ -159,6 +170,22 @@ Abandon unwanted quests in one click, keeping the ones you want:
 |---|---|---|
 | Enable in-range tracker | Off | Shows a crosshair over your character — white when your target is in melee range, red when out of range. |
 | Enable trinket tracker | Off | Shows your equipped trinkets and their cooldowns in a box. Hold **Ctrl + left-drag** to move it. |
+| Enable stat display | Off | Your stats as plain text on screen, one colour each — Str/AP red, Agi/crit green, Int/SP blue, Spirit white, Stamina gold, hit orange, expertise purple. Hold **Ctrl + left-drag** to move it. |
+| └ Strength / Agility / Stamina / Intellect / Spirit | Sta off, rest on | Per-stat toggles for the primary stats. |
+| └ Attack power / Spell power | **On** | Melee attack power; spell power is the best school, as the paper doll shows it. |
+| └ Melee crit % / Spell crit % | Melee on | Crit chance. |
+| └ Melee hit % / Spell hit % | Melee on | Hit from rating, plus whatever talents and gear add flat. |
+| └ Expertise | **On** | Expertise points. |
+| └ Hide stats sitting at zero | **On** | A stat with no value drops out instead of taking up a line — handy on a classless server. |
+| └ Lock in place | Off | Locked, it takes no mouse input, so clicks pass straight through it. |
+| └ Layout | Vertical list | Vertical list (values right-aligned in a column) or one row. |
+| └ Font size | 12 | 8–24. |
+| Show the loot rolls list | Off | A "Loot Rolls" block under the objectives frame listing what your group most recently rolled on. Click an item to see every player's choice. |
+| └ Attach to the objectives frame | **On** | On: sits underneath your tracked quests, styled like one of the tracker's own blocks. Off: a free-floating box you move with **Ctrl + left-drag**. |
+| └ Limit the quests the tracker lists | **On**, 5 | Caps how many quests the objectives frame draws so the loot rolls block stays in view. The rest stay tracked, they're just not listed. |
+| └ List players who passed | **On** | Include players who passed in the expanded list. |
+| └ Items to list | 4 | How many recent items the block shows. |
+| └ Hide the list after *N* seconds | 120 | Hides the block once the newest roll has been finished this long (0 = never). |
 
 Melee range is exact: it uses `IsSpellInRange` with a real 5-yard melee ability. Since Ascension is classless, the tracker auto-detects a melee ability you know from a built-in list — or you can type a specific ability name in the module options. If no melee ability is found it falls back to a coarse ~9.9 yd distance check.
 </details>
