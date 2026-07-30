@@ -663,9 +663,17 @@ end
 local Page = {}
 Page.__index = Page
 
+-- Widget options take `indent = true`; Text/Hint/_Place take a level. The two got
+-- mixed up often enough -- `true * INDENT` is a runtime error, and it takes a
+-- settings page down with it -- that accepting either is worth the three lines.
+local function IndentX(indent)
+    if indent == true then return INDENT end
+    return (tonumber(indent) or 0) * INDENT
+end
+
 function Page:_Place(widget, indent, gap)
     widget:ClearAllPoints()
-    local x = (indent or 0) * INDENT
+    local x = IndentX(indent)
     widget:SetPoint("TOPLEFT", self.content, "TOPLEFT", x, self.y)
     -- Checks claim the whole row: the wrapper is their click target, so a full
     -- width means clicking anywhere on the line toggles them. Anything else keeps
@@ -696,9 +704,147 @@ function Page:Header(text)
     return fs
 end
 
+-- ------------------------------------------------------------------ sections
+-- A collapsible block: a header that folds its contents away, with the feature's
+-- own on/off switch sitting in the header itself. Pages that describe several
+-- sizeable features (UI Features runs to four) are unreadable as one flat scroll.
+--
+-- A section's contents go into a container frame of their own rather than onto
+-- the page flow, so folding one is only hiding that frame and re-anchoring the
+-- sections below it. The consequence: once a page opens its first section,
+-- everything after it has to live inside a section too.
+local SECTION_H, SECTION_GAP = 24, 8
+
+function Page:Section(opts)
+    self:_CloseSection()
+    if not self.sections[1] then self.sectionsY = self.y end
+
+    local page = self
+    local section = { collapsed = opts.collapsed ~= false }
+
+    local header = CreateFrame("Button", nil, self.pageContent)
+    header:SetSize(self.width, SECTION_H)
+
+    -- The fold marker is drawn rather than borrowed: two accent bars in the same
+    -- flat square the checkboxes use, minus when open and plus when shut. Blizzard's
+    -- +/- button art would be the only bevelled thing in the window.
+    local glyph = CreateFrame("Frame", nil, header)
+    glyph:SetSize(CHECK_SIZE, CHECK_SIZE)
+    glyph:SetPoint("LEFT", 0, 1)
+    SetFlatBackdrop(glyph, C.field, C.border)
+    section.glyph = glyph
+
+    local function Bar(w, h)
+        local bar = glyph:CreateTexture(nil, "ARTWORK")
+        bar:SetTexture(FLAT)
+        bar:SetVertexColor(C.accent[1], C.accent[2], C.accent[3])
+        bar:SetSize(w, h)
+        bar:SetPoint("CENTER")
+        return bar
+    end
+    Bar(CHECK_SIZE - 6, 2)                  -- always there: the minus
+    section.stem = Bar(2, CHECK_SIZE - 6)   -- shown only when shut: makes it a plus
+
+    local title = header:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    title:SetPoint("LEFT", CHECK_SIZE + 8, 1)
+    title:SetText(opts.title or "")
+    Colorize(title, C.accent)
+
+    local rule = header:CreateTexture(nil, "ARTWORK")
+    rule:SetTexture(FLAT)
+    rule:SetVertexColor(C.line[1], C.line[2], C.line[3], C.line[4])
+    rule:SetHeight(1)
+    rule:SetPoint("BOTTOMLEFT", 0, 0)
+    rule:SetPoint("BOTTOMRIGHT", 0, 0)
+
+    header:SetScript("OnEnter", function()
+        Colorize(title, C.text)
+        glyph:SetBackdropBorderColor(C.accent[1], C.accent[2], C.accent[3])
+    end)
+    header:SetScript("OnLeave", function()
+        Colorize(title, C.accent)
+        glyph:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    end)
+    header:SetScript("OnClick", function()
+        section.collapsed = not section.collapsed
+        page:_LayoutSections()
+    end)
+    self.widgets[#self.widgets + 1] = header
+
+    -- The feature's own switch, on the header rather than as the first line
+    -- inside: it stays reachable with the section folded shut.
+    if opts.get then
+        local check = MakeCheck(header, {
+            label = opts.checkLabel or "Enabled", tooltip = opts.tooltip, width = 100,
+            get = opts.get, set = opts.set, onChange = opts.onChange,
+        })
+        check:ClearAllPoints()
+        check:SetPoint("RIGHT", header, "RIGHT", 0, 1)
+        check:SetFrameLevel(header:GetFrameLevel() + 2)
+        section.check = check
+        self.widgets[#self.widgets + 1] = check
+    end
+
+    local body = CreateFrame("Frame", nil, self.pageContent)
+    body:SetSize(self.width, 1)
+    section.header, section.body = header, body
+    -- Anything placed from here on lands in the body, measured from its own top.
+    section.widgetStart = #self.widgets + 1
+    self.sections[#self.sections + 1] = section
+    self.section = section
+    self.content = body
+    self.y = -SECTION_GAP
+
+    return section
+end
+
+function Page:_CloseSection()
+    local section = self.section
+    if not section then return end
+
+    section.height = -self.y
+    section.body:SetHeight(math.max(1, section.height))
+    self.section = nil
+    self.content = self.pageContent
+
+    -- Everything the section placed dims with its switch, for free.
+    if section.check then
+        local children = {}
+        for i = section.widgetStart, #self.widgets do
+            children[#children + 1] = self.widgets[i]
+        end
+        section.check:BindChildren(children)
+    end
+
+    self:_LayoutSections()
+end
+
+function Page:_LayoutSections()
+    local y = self.sectionsY or 0
+    for _, section in ipairs(self.sections) do
+        section.header:ClearAllPoints()
+        section.header:SetPoint("TOPLEFT", self.pageContent, "TOPLEFT", 0, y)
+        y = y - SECTION_H
+
+        section.body:ClearAllPoints()
+        section.body:SetPoint("TOPLEFT", self.pageContent, "TOPLEFT", 0, y)
+        if section.collapsed then
+            section.body:Hide()
+        else
+            section.body:Show()
+            y = y - (section.height or 0)
+        end
+        y = y - SECTION_GAP
+
+        if section.collapsed then section.stem:Show() else section.stem:Hide() end
+    end
+    self.y = y
+    self.pageContent:SetHeight(math.max(1, -y + PAD))
+end
+
 function Page:Text(text, indent)
     local fs = self.content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    local x = (indent or 0) * INDENT
+    local x = IndentX(indent)
     WrapText(fs, self.width - x)
     fs:SetText(text)
     Colorize(fs, C.muted)
@@ -709,7 +855,7 @@ end
 
 function Page:Hint(text, indent)
     local fs = self.content:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    local x = (indent or 0) * INDENT
+    local x = IndentX(indent)
     WrapText(fs, self.width - x)
     fs:SetText(text)
     Colorize(fs, C.dim)
@@ -881,7 +1027,8 @@ end
 -- Called once the module has finished describing itself: sizes the scroll child
 -- so the scrollbar knows how far it can go.
 function Page:Finish()
-    self.content:SetHeight(math.max(1, -self.y + PAD))
+    self:_CloseSection()
+    self.pageContent:SetHeight(math.max(1, -self.y + PAD))
 end
 
 function UI.CreatePage(parent, width)
@@ -890,9 +1037,11 @@ function UI.CreatePage(parent, width)
     page.y = 0
     page.widgets = {}
     page.refreshers = {}
+    page.sections = {}
     page.content = CreateFrame("Frame", nil, parent)
     page.content:SetWidth(page.width)
     page.content:SetHeight(1)
+    page.pageContent = page.content   -- where the page flow lives, sections aside
     return page
 end
 
@@ -1000,6 +1149,9 @@ local function BuildPage(module)
     if module and module.BuildSettings then
         local ok, err = pcall(module.BuildSettings, module, page)
         if not ok then
+            -- The module may have died mid-section, which would drop the message
+            -- into a body that is folded shut. Close it first so it's readable.
+            page:_CloseSection()
             page:Text("|cffff4040This module's settings failed to build:|r " .. tostring(err))
         end
     elseif not module then

@@ -26,6 +26,14 @@ Slider/Button`, plus `page:Row` (side by side) and `page:Grid` (labelled dropdow
 grid). Never build a Blizzard options panel and never call
 `InterfaceOptions_AddCategory` from a module.
 
+For a feature with a lot of settings, use `page:Section{title, get, set,
+onChange}` instead of `page:Header` — a collapsible block whose header carries
+the feature's on/off switch, folded shut by default, and which dims everything
+inside it when switched off (no `BindChildren` needed). One rule comes with it:
+**once a page opens its first section, everything after it must live in a
+section too**, because sections own their contents in a container frame of their
+own while plain content sits on the page flow. Small features stay plain headers.
+
 ## Rule: every new module MUST follow the registration convention
 A module appears in the rail automatically as long as it registers with a `key`
 and `title` — Core iterates `ns.modules`.
