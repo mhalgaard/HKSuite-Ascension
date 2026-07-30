@@ -242,12 +242,24 @@ function M:OnInit()
                 LootSlot(i)
             end
         elseif event == "LOOT_BIND_CONFIRM" then
+            -- This event arrives from *inside* LootSlot(), so confirming here is a
+            -- re-entrant call the client drops -- while the StaticPopup_Hide that
+            -- followed it went through regardless. The result was a confirmation
+            -- left pending with nothing on screen to answer it, which reads as
+            -- "the loot needs a second click, and no dialog ever appears".
+            --
+            -- Answer it a frame later instead, once LootSlot has returned, and
+            -- only dismiss the prompt as part of that same step.
             if cfg.autoConfirmBoP then
-                ConfirmLootSlot(arg1)         -- arg1 = loot slot index
-                StaticPopup_Hide("LOOT_BIND")
-                if ElvUI and ElvUI[1] and ElvUI[1].StaticPopup_Hide then
-                    pcall(ElvUI[1].StaticPopup_Hide, ElvUI[1], "LOOT_BIND")
-                end
+                local slot = arg1             -- arg1 = loot slot index
+                ns.After(0, function()
+                    if not (ns.IsModuleEnabled("system") and cfg.autoConfirmBoP) then return end
+                    ConfirmLootSlot(slot)
+                    StaticPopup_Hide("LOOT_BIND")
+                    if ElvUI and ElvUI[1] and ElvUI[1].StaticPopup_Hide then
+                        pcall(ElvUI[1].StaticPopup_Hide, ElvUI[1], "LOOT_BIND")
+                    end
+                end)
             end
         end
     end)
