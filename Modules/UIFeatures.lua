@@ -6,14 +6,17 @@ local ADDON, ns = ...
 --     is in melee range, red when it's out of range.
 --   * Trinket tracker   â€” a movable box showing your equipped trinkets and their
 --     cooldowns (move with Ctrl + left-drag).
---   * Loot rolls        â€” a "Loot Rolls" section in the objectives tracker
---     listing recently rolled items, expandable to each player's choice.
+--   * Stat display      â€” your stats as plain text on screen, one toggle per
+--     line, laid out as a column or a row.
+--   * Loot rolls        â€” a "Loot Rolls" section under the objectives tracker's
+--     quests, styled like one of its own blocks, listing recently rolled items
+--     and expandable to each player's choice.
 -- =============================================================================
 
 local M = ns.RegisterModule({
     key   = "uifeatures",
     title = "UI Features",
-    desc  = "In-range crosshair, trinket cooldown tracker, and a loot rolls list on the objectives frame.",
+    desc  = "In-range crosshair, trinket cooldown tracker, on-screen stat readout, and a loot rolls list on the objectives frame.",
 })
 
 ns.defaults.uifeatures = {
@@ -22,13 +25,28 @@ ns.defaults.uifeatures = {
     trinketTracker = false,
     trinketPos     = { "CENTER", "CENTER", 0, -160 },  -- point, relPoint, x, y
 
-    lootRolls          = false,
-    lootRollsMax       = 4,     -- how many recent items the section lists
-    lootRollsHideAfter = 120,   -- hide the section this long after the last roll ended (0 = never)
-    lootRollsShowPass  = true,  -- list players who passed
-    lootRollsAttach    = true,  -- sit in the objectives tracker (else a free-floating box)
-    lootRollsCollapsed = false, -- section collapsed to just its header
-    lootRollsPos       = { "TOPRIGHT", "TOPRIGHT", -220, -260 },
+    -- Stat display: one toggle per line, so a build only lists what it uses.
+    statText      = false,
+    statPos       = { "CENTER", "CENTER", 220, -160 },
+    statLayout    = "vertical",   -- or "horizontal"
+    statFontSize  = 12,
+    statHideZero  = true,         -- drop lines sitting at zero
+    statLocked    = false,        -- locked: no mouse, so clicks pass through it
+    statStr = true, statAgi = true, statSta = false, statInt = true, statSpi = true,
+    statAP = true, statSP = true,
+    statCrit = true, statSpellCrit = false,
+    statHit = true, statSpellHit = false,
+    statExpertise = true,
+
+    lootRolls           = false,
+    lootRollsMax        = 4,     -- how many recent items the section lists
+    lootRollsHideAfter  = 120,   -- hide the section this long after the last roll ended (0 = never)
+    lootRollsShowPass   = true,  -- list players who passed
+    lootRollsAttach     = true,  -- sit under the objectives tracker (else a free-floating box)
+    lootRollsCollapsed  = false, -- section collapsed to just its header
+    lootRollsLimitQuests = true, -- cap the tracker's quest list so the section stays in view
+    lootRollsQuestLimit  = 5,
+    lootRollsPos        = { "TOPRIGHT", "TOPRIGHT", -220, -260 },
 }
 
 local cfg  -- filled in OnInit
@@ -283,6 +301,254 @@ local function BuildTrinketBox()
     trinketBox:Hide()
 end
 
+-- ------------------------------------------------------------- stat display
+-- A plain-text readout of the stats that matter, parked wherever you want it.
+-- Ascension is classless, so which stats matter changes from build to build:
+-- every line is its own toggle, and lines sitting at zero can drop out on their
+-- own so a build only ever shows what it actually uses.
+--
+-- Every reader is guarded and returns nil when the client hasn't got the API
+-- behind it -- a stat that can't be read simply isn't listed.
+local STAT_PAD, STAT_GAP = 8, 14   -- label-to-value, and between entries in a row
+
+local statBox, statLines, statsDirty
+
+local function PrimaryStat(index)
+    return function()
+        if not UnitStat then return end
+        local _, effective = UnitStat("player", index)
+        return effective
+    end
+end
+
+local function MeleeAttackPower()
+    if not UnitAttackPower then return end
+    local base, pos, neg = UnitAttackPower("player")
+    if not base then return end
+    return base + (pos or 0) + (neg or 0)
+end
+
+-- Spell power is per school; the paper doll shows the best of them, so do that.
+local function BestBySchool(fn)
+    if not fn then return end
+    local best
+    for school = 2, 7 do
+        local value = fn(school)
+        if value and (not best or value > best) then best = value end
+    end
+    return best
+end
+
+local function SpellPower()     return BestBySchool(GetSpellBonusDamage) end
+local function SpellCrit()      return BestBySchool(GetSpellCritChance) end
+local function MeleeCrit()      return GetCritChance and GetCritChance() end
+
+-- Hit comes from rating plus whatever talents and gear add flat, which the
+-- rating APIs don't include.
+local function HitChance(ratingIndex, flatModifier)
+    return function()
+        if not GetCombatRatingBonus then return end
+        local pct = GetCombatRatingBonus(ratingIndex) or 0
+        if flatModifier and _G[flatModifier] then
+            pct = pct + (_G[flatModifier]() or 0)
+        end
+        return pct
+    end
+end
+
+local function Expertise()
+    if not GetExpertise then return end
+    return (GetExpertise())
+end
+
+-- One colour per stat, so a line is recognisable before you've read it. The spell
+-- variants take their melee counterpart's colour; Stamina keeps the gold it wears
+-- on the paper doll.
+local RED    = { 0.90, 0.30, 0.30 }
+local GREEN  = { 0.35, 0.85, 0.35 }
+local BLUE   = { 0.35, 0.60, 1.00 }
+local WHITE  = { 0.95, 0.95, 0.95 }
+local ORANGE = { 1.00, 0.60, 0.20 }
+local PURPLE = { 0.75, 0.45, 1.00 }
+local GOLD   = { 1.00, 0.85, 0.30 }
+
+local STATS = {
+    { option = "statStr",       label = "Str",   color = RED,    read = PrimaryStat(1) },
+    { option = "statAgi",       label = "Agi",   color = GREEN,  read = PrimaryStat(2) },
+    { option = "statSta",       label = "Sta",   color = GOLD,   read = PrimaryStat(3) },
+    { option = "statInt",       label = "Int",   color = BLUE,   read = PrimaryStat(4) },
+    { option = "statSpi",       label = "Spi",   color = WHITE,  read = PrimaryStat(5) },
+    { option = "statAP",        label = "AP",    color = RED,    read = MeleeAttackPower },
+    { option = "statSP",        label = "SP",    color = BLUE,   read = SpellPower },
+    { option = "statCrit",      label = "Crit",  color = GREEN,  read = MeleeCrit,  percent = true },
+    { option = "statSpellCrit", label = "sCrit", color = GREEN,  read = SpellCrit,  percent = true },
+    { option = "statHit",       label = "Hit",   color = ORANGE, read = HitChance(_G.CR_HIT_MELEE or 6, "GetHitModifier"), percent = true },
+    { option = "statSpellHit",  label = "sHit",  color = ORANGE, read = HitChance(_G.CR_HIT_SPELL or 8, "GetSpellHitModifier"), percent = true },
+    { option = "statExpertise", label = "Exp",   color = PURPLE, read = Expertise },
+}
+
+local function StatFont()
+    local file = GameFontNormal:GetFont()
+    return file, tonumber(cfg.statFontSize) or 12
+end
+
+local function GetStatLine(i)
+    local line = statLines[i]
+    if line then return line end
+
+    line = CreateFrame("Frame", nil, statBox)
+    line.label = line:CreateFontString(nil, "OVERLAY")
+    line.label:SetJustifyH("LEFT")
+    line.value = line:CreateFontString(nil, "OVERLAY")
+    line.value:SetJustifyH("LEFT")
+    -- A shadow, because this sits over whatever happens to be on screen.
+    for _, fs in ipairs({ line.label, line.value }) do
+        fs:SetShadowOffset(1, -1)
+        fs:SetShadowColor(0, 0, 0, 1)
+    end
+
+    statLines[i] = line
+    return line
+end
+
+local function FormatStat(def, value)
+    if def.percent then return ("%.2f%%"):format(value) end
+    return tostring(math.floor(value + 0.5))
+end
+
+local function UpdateStats()
+    if not statBox then return end
+    statsDirty = false
+
+    if not (enabled() and cfg.statText) then
+        statBox:Hide()
+        return
+    end
+
+    statBox:EnableMouse(not cfg.statLocked)
+
+    -- First pass: fill the lines in and measure them, since a vertical list wants
+    -- one column width for every value and a row wants each entry's own width.
+    local file, size = StatFont()
+    local used, labelW, valueW = 0, 0, 0
+    for _, def in ipairs(STATS) do
+        if cfg[def.option] then
+            local value = def.read()
+            if value and (value ~= 0 or not cfg.statHideZero) then
+                used = used + 1
+                local line = GetStatLine(used)
+                line.label:SetFont(file, size, "OUTLINE")
+                line.value:SetFont(file, size, "OUTLINE")
+                line.label:SetText(def.label)
+                line.value:SetText(FormatStat(def, value))
+                -- The value carries the stat's colour; the label a dimmer shade of
+                -- it, so the two read as one entry.
+                local r, g, b = unpack(def.color or WHITE)
+                line.label:SetTextColor(r * 0.7, g * 0.7, b * 0.7)
+                line.value:SetTextColor(r, g, b)
+                line.labelW = math.ceil(line.label:GetStringWidth())
+                line.valueW = math.ceil(line.value:GetStringWidth())
+                labelW = math.max(labelW, line.labelW)
+                valueW = math.max(valueW, line.valueW)
+                line:Show()
+            end
+        end
+    end
+    for i = used + 1, #statLines do statLines[i]:Hide() end
+
+    if used == 0 then
+        statBox:Hide()
+        return
+    end
+
+    local lineH = size + 4
+    if cfg.statLayout == "horizontal" then
+        local x = 0
+        for i = 1, used do
+            local line = statLines[i]
+            local width = line.labelW + STAT_PAD + line.valueW
+            line:ClearAllPoints()
+            line:SetSize(width, lineH)
+            line:SetPoint("LEFT", statBox, "LEFT", x, 0)
+            line.label:ClearAllPoints()
+            line.label:SetPoint("LEFT", line, "LEFT", 0, 0)
+            line.value:ClearAllPoints()
+            line.value:SetPoint("LEFT", line, "LEFT", line.labelW + STAT_PAD, 0)
+            x = x + width + STAT_GAP
+        end
+        statBox:SetSize(math.max(1, x - STAT_GAP), lineH)
+    else
+        -- Values share a right-aligned column so the numbers line up.
+        local width = labelW + STAT_PAD + valueW
+        for i = 1, used do
+            local line = statLines[i]
+            line:ClearAllPoints()
+            line:SetSize(width, lineH)
+            line:SetPoint("TOPLEFT", statBox, "TOPLEFT", 0, -(i - 1) * lineH)
+            line.label:ClearAllPoints()
+            line.label:SetPoint("LEFT", line, "LEFT", 0, 0)
+            line.value:ClearAllPoints()
+            line.value:SetPoint("RIGHT", line, "RIGHT", 0, 0)
+        end
+        statBox:SetSize(width, used * lineH)
+    end
+
+    statBox:Show()
+end
+
+local function SaveStatPosition()
+    local point, _, relPoint, x, y = statBox:GetPoint()
+    cfg.statPos = { point, relPoint, x, y }
+end
+
+local function BuildStatBox()
+    statBox = CreateFrame("Frame", "HKSuiteStatText", UIParent)
+    statBox:SetSize(80, 20)
+    local p = cfg.statPos or {}
+    statBox:SetPoint(p[1] or "CENTER", UIParent, p[2] or "CENTER", p[3] or 220, p[4] or -160)
+    statBox:SetFrameStrata("MEDIUM")
+    statBox:SetClampedToScreen(true)
+    statBox:SetMovable(true)
+    statBox:RegisterForDrag("LeftButton")
+    statBox:SetScript("OnDragStart", function(self)
+        if IsControlKeyDown() and not cfg.statLocked then self:StartMoving() end
+    end)
+    statBox:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveStatPosition()
+    end)
+    statBox:Hide()
+
+    statLines = {}
+
+    -- Stat changes arrive in bursts (an equip swap fires several of these at
+    -- once), so events only mark the readout dirty and one redraw covers the lot.
+    local ev = CreateFrame("Frame")
+    for _, event in ipairs({
+        "UNIT_STATS", "UNIT_ATTACK_POWER", "UNIT_RANGED_ATTACK_POWER",
+        "UNIT_ATTACK", "UNIT_AURA", "UNIT_LEVEL", "UNIT_RESISTANCES",
+        "PLAYER_DAMAGE_DONE_MODS", "COMBAT_RATING_UPDATE", "SPELL_POWER_CHANGED",
+        "PLAYER_EQUIPMENT_CHANGED", "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED",
+    }) do
+        pcall(ev.RegisterEvent, ev, event)   -- not every build has every one
+    end
+    ev:SetScript("OnEvent", function(_, event, arg1)
+        -- Unit events carry a unit token; PLAYER_EQUIPMENT_CHANGED carries a slot
+        -- number, so only a string argument is a unit worth filtering on.
+        if type(arg1) == "string" and arg1 ~= "player" then return end
+        if enabled() and cfg.statText then statsDirty = true end
+    end)
+
+    statBox.ticker = CreateFrame("Frame")
+    statBox.ticker:SetScript("OnUpdate", function(self, e)
+        if not statsDirty then return end
+        self.elapsed = (self.elapsed or 0) + e
+        if self.elapsed < 0.2 then return end
+        self.elapsed = 0
+        UpdateStats()
+    end)
+end
+
 -- --------------------------------------------------------------- loot rolls
 -- A "Loot Rolls" section for the objectives tracker.
 --
@@ -299,9 +565,9 @@ end
 -- resolve on their own; players out of the loot group simply never answer and
 -- stay listed as waiting until the roll times out.
 
-local LR_HEADER_H, LR_ITEM_H, LR_PLAYER_H = 16, 15, 12
-local LR_PAD, LR_DEFAULT_W = 3, 204
-local LR_ITEM_INDENT, LR_PLAYER_INDENT = 25, 32   -- item names clear the icon; players nest under them
+local LR_PAD, LR_DEFAULT_W = 3, 204    -- LR_DEFAULT_W = WATCHFRAME_EXPANDEDWIDTH
+local LR_TOGGLE_X = 0                  -- the +/- sits where a quest title starts
+local LR_INDENT   = 13                 -- icon / dash column, clear of the +/-
 
 -- Roll choices, in the order group loot numbers them.
 local VOTE = {
@@ -312,12 +578,15 @@ local VOTE = {
 }
 local WAITING_COLOR = { 1.00, 0.55, 0.15 }
 local DIM_COLOR     = { 0.45, 0.45, 0.45 }
+-- The objectives frame's own palette: the gold it titles entries in, the brighter
+-- gold it highlights them with, and the colour of an objective line.
+local TITLE_COLOR     = { 0.75, 0.61, 0.00 }
+local HIGHLIGHT_COLOR = { 1.00, 0.80, 0.10 }
 
 local rolls    = {}   -- roll records, newest first
 local rollByID = {}   -- live rollID -> record
 local lootFrame, lrRows, lrHeader
 local trackerCollapsed = false
-local baseWatchOffset, pushedHeight
 
 local RefreshLootRolls   -- forward declaration (event handlers call it)
 
@@ -583,6 +852,75 @@ local function HandleLootMessage(msg)
     end
 end
 
+-- ------------------------------------------------------------- tracker look
+-- The section is meant to read as one more block of the objectives frame, so it
+-- borrows the frame's own metrics and font rather than picking its own. The font
+-- is read off a live tracker line, which means whatever restyled the tracker
+-- (ElvUI, the client's own objectives font) carries over for free.
+local function TrackerLineHeight()
+    local h = tonumber(_G.WATCHFRAME_LINEHEIGHT)
+    if h and h >= 8 then return h end
+    return 16
+end
+
+local function TrackerBlockGap()
+    local g = tonumber(_G.WATCHFRAME_TYPE_OFFSET)
+    if g and g >= 0 then return g end
+    return 10
+end
+
+local function PoolFont(pool)
+    local line = type(pool) == "table" and pool[1]
+    if line and line.text then
+        local file, size, flags = line.text:GetFont()
+        if file then return file, size, flags end
+    end
+end
+
+local function TrackerFont()
+    local file, size, flags = PoolFont(_G.WATCHFRAME_QUESTLINES)
+    if not file then file, size, flags = PoolFont(_G.WATCHFRAME_ACHIEVEMENTLINES) end
+    if file then return file, size, flags end
+    return GameFontHighlight:GetFont()      -- nothing tracked yet
+end
+
+local lrFontFile, lrFontSize, lrFontFlags
+
+local function SetRowFont(fs)
+    if fs and lrFontFile then fs:SetFont(lrFontFile, lrFontSize, lrFontFlags) end
+end
+
+local function ApplyTrackerFont(row)
+    SetRowFont(row.left)
+    SetRowFont(row.right)
+    SetRowFont(row.dash)
+end
+
+-- Re-reads the tracker's font and pushes it onto the section. A no-op unless
+-- something restyled the tracker since the last refresh.
+local function RefreshTrackerFont()
+    local file, size, flags = TrackerFont()
+    if not file then return end
+    if file == lrFontFile and size == lrFontSize and flags == lrFontFlags then return end
+    lrFontFile, lrFontSize, lrFontFlags = file, size, flags
+    if lrHeader then SetRowFont(lrHeader.text) end
+    if lrRows then
+        for _, row in ipairs(lrRows) do ApplyTrackerFont(row) end
+    end
+end
+
+-- ElvUI swaps the tracker's collapse button for its own square +/-; match it when
+-- it's there so our section doesn't stand out.
+local function ToggleTexture(expanded)
+    local E = _G.ElvUI and _G.ElvUI[1]
+    local media = E and E.Media and E.Media.Textures
+    if media and media.MinusButton and media.PlusButton then
+        return expanded and media.MinusButton or media.PlusButton
+    end
+    return expanded and "Interface\\Buttons\\UI-MinusButton-Up"
+                     or "Interface\\Buttons\\UI-PlusButton-Up"
+end
+
 -- ------------------------------------------------------------------ display
 -- Pending rolls open themselves so you can see who is still missing; once
 -- nothing is pending, the roll that finished most recently opens instead.
@@ -603,14 +941,20 @@ local function SetTruncated(fs, text, maxWidth)
     end
 end
 
+-- The tracker highlights an entry by turning its title gold rather than by
+-- painting a bar behind it, so that's what a hovered item row does too.
 local function RowOnEnter(self)
+    self.left:SetTextColor(unpack(HIGHLIGHT_COLOR))
     if not self.link then return end
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:SetHyperlink(self.link)
     GameTooltip:Show()
 end
 
-local function RowOnLeave() GameTooltip:Hide() end
+local function RowOnLeave(self)
+    if self.baseR then self.left:SetTextColor(self.baseR, self.baseG, self.baseB) end
+    GameTooltip:Hide()
+end
 
 local function RowOnClick(self)
     local rec = self.rec
@@ -634,45 +978,53 @@ local function GetRow(i)
     row:SetPoint("RIGHT", lootFrame, "RIGHT", 0, 0)
 
     row.toggle = row:CreateTexture(nil, "ARTWORK")
-    row.toggle:SetSize(10, 10)
-    row.toggle:SetPoint("LEFT", 0, 0)
+    row.toggle:SetPoint("LEFT", LR_TOGGLE_X, 0)
 
     row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetSize(11, 11)
-    row.icon:SetPoint("LEFT", 12, 0)
+    row.icon:SetPoint("LEFT", LR_INDENT, 0)
     row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    row.left = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    row.left:SetPoint("LEFT", 25, 0)
+    -- Objective lines in the tracker are a dash in its own column with the text
+    -- beside it; player rows are laid out the same way. The font object is only a
+    -- starting point -- ApplyTrackerFont swaps in whatever the tracker is using.
+    row.dash = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    row.dash:SetPoint("LEFT", LR_INDENT, 0)
+    row.dash:SetJustifyH("LEFT")
+    row.dash:SetTextColor(unpack(DIM_COLOR))
+
+    row.left = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     row.left:SetJustifyH("LEFT")
 
-    row.right = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    row.right = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     row.right:SetPoint("RIGHT", -2, 0)
     row.right:SetJustifyH("RIGHT")
 
-    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-    row:GetHighlightTexture():SetAlpha(0.35)
     row:SetScript("OnEnter", RowOnEnter)
     row:SetScript("OnLeave", RowOnLeave)
     row:SetScript("OnClick", RowOnClick)
 
     lrRows[i] = row
+    ApplyTrackerFont(row)
     return row
 end
 
 local function LayoutItemRow(row, rec, y, width, expanded)
-    row:SetHeight(LR_ITEM_H)
+    local lineH = TrackerLineHeight()
+    row:SetHeight(lineH)
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", lootFrame, "TOPLEFT", 0, y)
     row:SetPoint("TOPRIGHT", lootFrame, "TOPRIGHT", 0, y)
     row.rec, row.link, row.expanded = rec, rec.link, expanded
     row:EnableMouse(true)
 
-    row.toggle:SetTexture(expanded and "Interface\\Buttons\\UI-MinusButton-Up"
-                                    or "Interface\\Buttons\\UI-PlusButton-Up")
+    local iconSize = lineH - 4
+    row.toggle:SetSize(iconSize, iconSize)
+    row.toggle:SetTexture(ToggleTexture(expanded))
     row.toggle:Show()
+    row.icon:SetSize(iconSize, iconSize)
     row.icon:SetTexture(rec.texture)
     row.icon:Show()
+    row.dash:Hide()
 
     -- Right column: progress + countdown while open, the outcome once closed.
     local rightText, rc, rg, rb
@@ -699,22 +1051,26 @@ local function LayoutItemRow(row, rec, y, width, expanded)
     row.right:SetTextColor(rc, rg, rb)
 
     local q = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[rec.quality]
-    row.left:SetTextColor(q and q.r or 1, q and q.g or 1, q and q.b or 1)
+    row.baseR, row.baseG, row.baseB = q and q.r or 1, q and q.g or 1, q and q.b or 1
+    row.left:SetTextColor(row.baseR, row.baseG, row.baseB)
+    local indent = LR_INDENT + iconSize + 3
     row.left:ClearAllPoints()
-    row.left:SetPoint("LEFT", row, "LEFT", LR_ITEM_INDENT, 0)
+    row.left:SetPoint("LEFT", row, "LEFT", indent, 0)
     local label = rec.count > 1 and (rec.count .. "x " .. rec.name) or rec.name
-    SetTruncated(row.left, label, width - LR_ITEM_INDENT - row.right:GetStringWidth() - 6)
+    SetTruncated(row.left, label, width - indent - row.right:GetStringWidth() - 6)
 end
 
 local function LayoutPlayerRow(row, rec, name, y, width)
-    row:SetHeight(LR_PLAYER_H)
+    row:SetHeight(TrackerLineHeight())
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", lootFrame, "TOPLEFT", 0, y)
     row:SetPoint("TOPRIGHT", lootFrame, "TOPRIGHT", 0, y)
-    row.rec, row.link, row.expanded = nil, nil, nil
+    row.rec, row.link, row.expanded, row.baseR = nil, nil, nil, nil
     row:EnableMouse(false)
     row.toggle:Hide()
     row.icon:Hide()
+    row.dash:SetText(_G.QUEST_DASH or " - ")
+    row.dash:Show()
 
     local vote = rec.votes[name]
     local rightText, rc, rg, rb
@@ -735,9 +1091,10 @@ local function LayoutPlayerRow(row, rec, name, y, width)
     else
         row.left:SetTextColor(unpack(DIM_COLOR))
     end
+    local indent = LR_INDENT + math.ceil(row.dash:GetStringWidth())
     row.left:ClearAllPoints()
-    row.left:SetPoint("LEFT", row, "LEFT", LR_PLAYER_INDENT, 0)
-    SetTruncated(row.left, name, width - LR_PLAYER_INDENT - row.right:GetStringWidth() - 6)
+    row.left:SetPoint("LEFT", row, "LEFT", indent, 0)
+    SetTruncated(row.left, name, width - indent - row.right:GetStringWidth() - 6)
 end
 
 -- Answered first (in the order they answered), then everyone still missing.
@@ -777,41 +1134,57 @@ local function ShouldShow()
     return true
 end
 
--- Reserve room at the top of the tracker so the quest lines start below us.
--- WatchFrame_Update reads WATCHFRAME_INITIAL_OFFSET each time it lays out, so
--- shifting the global and asking for a relayout is all it takes. We stay out of
--- combat when forcing that relayout: the tracker's quest-item buttons are
--- protected, and poking Blizzard's layout mid-fight risks blocking them.
-local function PushTracker(height)
-    if type(baseWatchOffset) ~= "number" then return end
-    if pushedHeight == height then return end
-    pushedHeight = height
-    WATCHFRAME_INITIAL_OFFSET = baseWatchOffset - height
-    if type(WatchFrame_Update) == "function" and not InCombatLockdown() then
-        WatchFrame_Update()
+-- --------------------------------------------------- sitting under the quests
+-- The tracker lays its blocks out top-down inside WatchFrameLines, each line
+-- anchored to the one above it, so the bottom of the list is simply the lowest
+-- line still shown. We measure that rather than trusting WatchFrame.nextOffset:
+-- the quest limit below hides trailing lines after the layout has run, and that
+-- offset would still count them.
+local LINE_POOLS = { "WATCHFRAME_QUESTLINES", "WATCHFRAME_ACHIEVEMENTLINES", "WATCHFRAME_TIMERLINES" }
+
+local function TrackerContentOffset()
+    local lines = _G.WatchFrameLines
+    local top = lines and lines:GetTop()
+    if not top then return end
+    local lowest
+    for _, key in ipairs(LINE_POOLS) do
+        local pool = _G[key]
+        if type(pool) == "table" then
+            for _, line in ipairs(pool) do
+                if line:IsShown() then
+                    local bottom = line:GetBottom()
+                    if bottom and (not lowest or bottom < lowest) then lowest = bottom end
+                end
+            end
+        end
     end
+    if not lowest then return 0 end     -- nothing tracked: start where the lines would
+    return lowest - top - TrackerBlockGap()
 end
 
 local function ApplyPlacement()
     if not lootFrame then return end
-    local wf = _G.WatchFrame
+    local lines = _G.WatchFrameLines
+    local attach = cfg.lootRollsAttach and lines
+    local offset = attach and TrackerContentOffset()
+    -- Attached but the tracker hasn't a valid rectangle yet (early login): leave the
+    -- section where it is rather than flinging it to the free-floating position.
+    if attach and not offset then return end
+
     lootFrame:ClearAllPoints()
-    if cfg.lootRollsAttach and wf then
-        local w = wf:GetWidth()
+    if offset then
+        -- Parented to the tracker's line frame so we inherit its scale and go with
+        -- it when something hides the whole tracker (ElvUI's boss-fight auto-hide).
+        if lootFrame:GetParent() ~= lines then lootFrame:SetParent(lines) end
+        local w = lines:GetWidth()
         if not w or w < 60 then w = LR_DEFAULT_W end
         lootFrame:SetWidth(w)
-        if baseWatchOffset then
-            -- Room was reserved at the top of the tracker: sit in it.
-            lootFrame:SetPoint("TOPLEFT", wf, "TOPLEFT", 0, 0)
-        else
-            -- No offset to claim on this client, so stack above the tracker
-            -- instead of drawing over the first quest.
-            lootFrame:SetPoint("BOTTOMLEFT", wf, "TOPLEFT", 0, 4)
-        end
-        lootFrame:SetFrameStrata(wf:GetFrameStrata())
-        lootFrame:SetFrameLevel(wf:GetFrameLevel() + 5)
+        lootFrame:SetPoint("TOPLEFT", lines, "TOPLEFT", 0, offset)
+        lootFrame:SetFrameStrata(lines:GetFrameStrata())
+        lootFrame:SetFrameLevel(lines:GetFrameLevel() + 5)
         lootFrame:EnableMouse(false)
     else
+        if lootFrame:GetParent() ~= UIParent then lootFrame:SetParent(UIParent) end
         lootFrame:SetWidth(LR_DEFAULT_W)
         local p = cfg.lootRollsPos or {}
         lootFrame:SetPoint(p[1] or "TOPRIGHT", UIParent, p[2] or "TOPRIGHT", p[3] or -220, p[4] or -260)
@@ -820,30 +1193,94 @@ local function ApplyPlacement()
     end
 end
 
+-- ---------------------------------------------------------------- quest limit
+-- Pinned under the quests, the section drifts down the screen with every extra
+-- quest you track, so cap how many the tracker draws. Blizzard draws quests last
+-- (timers, then achievements, then quests), which means hiding the trailing ones
+-- leaves no hole behind. We hide them after the layout has run rather than
+-- shortening the layout itself: the tracker's quest-item buttons are protected,
+-- and code of ours running inside Blizzard's layout would taint them.
+local hiddenLines = {}
+
+local function QuestLimit()
+    if not (enabled() and cfg.lootRolls and cfg.lootRollsAttach and cfg.lootRollsLimitQuests) then
+        return
+    end
+    local n = tonumber(cfg.lootRollsQuestLimit) or 0
+    if n >= 1 then return n end
+end
+
+local function LimitTrackerQuests()
+    local buttons, lines = _G.WATCHFRAME_LINKBUTTONS, _G.WatchFrameLines
+    if type(buttons) ~= "table" or not lines then return end
+
+    for line in pairs(hiddenLines) do hiddenLines[line] = nil end
+
+    local limit, shown = QuestLimit(), 0
+    if limit then
+        for _, button in ipairs(buttons) do
+            if button:IsShown() and button.type == "QUEST"
+                and button.lines and button.startLine and button.lastLine then
+                shown = shown + 1
+                if shown > limit then
+                    button:Hide()
+                    for i = button.startLine, button.lastLine do
+                        local line = button.lines[i]
+                        if line then
+                            line:Hide()
+                            hiddenLines[line] = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if not next(hiddenLines) then return end
+
+    -- A quest's item button and its map POI icon are anchored to its title line,
+    -- so anything hanging off a line we just hid goes with it.
+    for i = 1, lines:GetNumChildren() do
+        local child = select(i, lines:GetChildren())
+        if child:IsShown() and child:GetNumPoints() > 0 then
+            local _, relative = child:GetPoint(1)
+            if relative and hiddenLines[relative] then child:Hide() end
+        end
+    end
+end
+
+-- Make the tracker lay itself out again after a settings change. Never mid-fight:
+-- its quest-item buttons are protected and poking the layout risks blocking them.
+local function RelayoutTracker()
+    if type(_G.WatchFrame_Update) == "function" and not InCombatLockdown() then
+        WatchFrame_Update()
+    end
+    RefreshLootRolls()
+end
+
 function RefreshLootRolls()
     if not lootFrame then return end
 
     if not ShouldShow() then
         lootFrame:Hide()
-        PushTracker(0)
         return
     end
 
+    RefreshTrackerFont()
     ApplyPlacement()
+    local lineH = TrackerLineHeight()
     local width = lootFrame:GetWidth()
     local visible = VisibleRolls()
 
-    -- Header. The tracker's own collapse button sits in the top-right corner, so
-    -- keep the header text clear of it.
     local pending = 0
     for _, rec in ipairs(visible) do
         if not rec.finished then pending = pending + 1 end
     end
+    lrHeader:SetHeight(lineH)
+    lrHeader.toggle:SetSize(lineH - 4, lineH - 4)
     lrHeader.text:SetText(pending > 0 and ("Loot Rolls (" .. pending .. ")") or "Loot Rolls")
-    lrHeader.toggle:SetTexture(cfg.lootRollsCollapsed and "Interface\\Buttons\\UI-PlusButton-Up"
-                                                       or "Interface\\Buttons\\UI-MinusButton-Up")
+    lrHeader.toggle:SetTexture(ToggleTexture(not cfg.lootRollsCollapsed))
 
-    local used, y = 0, -LR_HEADER_H
+    local used, y = 0, -lineH
     if cfg.lootRollsCollapsed then
         for _, row in ipairs(lrRows) do row:Hide() end
     else
@@ -858,7 +1295,7 @@ function RefreshLootRolls()
             local row = GetRow(used)
             LayoutItemRow(row, rec, y, width, expanded)
             row:Show()
-            y = y - LR_ITEM_H
+            y = y - lineH
 
             if expanded then
                 for _, name in ipairs(PlayerOrder(rec)) do
@@ -866,17 +1303,15 @@ function RefreshLootRolls()
                     local prow = GetRow(used)
                     LayoutPlayerRow(prow, rec, name, y, width)
                     prow:Show()
-                    y = y - LR_PLAYER_H
+                    y = y - lineH
                 end
             end
         end
         for i = used + 1, #lrRows do lrRows[i]:Hide() end
     end
 
-    local height = LR_HEADER_H + (-y - LR_HEADER_H) + LR_PAD
-    lootFrame:SetHeight(math.max(LR_HEADER_H, height))
+    lootFrame:SetHeight(math.max(lineH, -y + LR_PAD))
     lootFrame:Show()
-    PushTracker(cfg.lootRollsAttach and (height + 4) or 0)
 end
 
 local function SaveLootRollsPosition()
@@ -886,7 +1321,9 @@ end
 
 local function BuildLootRollsFrame()
     lootFrame = CreateFrame("Frame", "HKSuiteLootRolls", UIParent)
-    lootFrame:SetSize(LR_DEFAULT_W, LR_HEADER_H)
+    lootFrame:SetSize(LR_DEFAULT_W, TrackerLineHeight())
+    local p = cfg.lootRollsPos or {}
+    lootFrame:SetPoint(p[1] or "TOPRIGHT", UIParent, p[2] or "TOPRIGHT", p[3] or -220, p[4] or -260)
     lootFrame:SetMovable(true)
     lootFrame:RegisterForDrag("LeftButton")
     lootFrame:SetScript("OnDragStart", function(self)
@@ -900,28 +1337,31 @@ local function BuildLootRollsFrame()
 
     lrRows = {}
 
+    -- Styled like one of the tracker's own entry titles: same font, same gold, and
+    -- the same brighter gold on hover.
     lrHeader = CreateFrame("Button", nil, lootFrame)
-    lrHeader:SetHeight(LR_HEADER_H)
+    lrHeader:SetHeight(TrackerLineHeight())
     lrHeader:SetPoint("TOPLEFT", 0, 0)
-    lrHeader:SetPoint("TOPRIGHT", -22, 0)   -- clear of the tracker's collapse button
+    lrHeader:SetPoint("TOPRIGHT", 0, 0)
     lrHeader.toggle = lrHeader:CreateTexture(nil, "ARTWORK")
-    lrHeader.toggle:SetSize(10, 10)
-    lrHeader.toggle:SetPoint("LEFT", 0, 0)
-    lrHeader.text = lrHeader:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    lrHeader.text:SetPoint("LEFT", 13, 0)
-    lrHeader.text:SetTextColor(1, 0.82, 0)
+    lrHeader.toggle:SetPoint("LEFT", LR_TOGGLE_X, 0)
+    lrHeader.text = lrHeader:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    lrHeader.text:SetPoint("LEFT", LR_INDENT, 0)
+    lrHeader.text:SetTextColor(unpack(TITLE_COLOR))
+    lrHeader:SetScript("OnEnter", function(self) self.text:SetTextColor(unpack(HIGHLIGHT_COLOR)) end)
+    lrHeader:SetScript("OnLeave", function(self) self.text:SetTextColor(unpack(TITLE_COLOR)) end)
     lrHeader:SetScript("OnClick", function()
         cfg.lootRollsCollapsed = not cfg.lootRollsCollapsed
         RefreshLootRolls()
     end)
+    RefreshTrackerFont()
 
     if _G.WatchFrame then
-        if type(WATCHFRAME_INITIAL_OFFSET) == "number" then
-            baseWatchOffset = WATCHFRAME_INITIAL_OFFSET
-        end
-        -- The tracker resizes itself (collapse, expanded width); keep in step.
+        -- The tracker relays out constantly (quest progress, collapse, width); the
+        -- quest limit and our own anchor both hang off the end of that.
         if type(WatchFrame_Update) == "function" then
             hooksecurefunc("WatchFrame_Update", function()
+                LimitTrackerQuests()
                 if lootFrame:IsShown() then ApplyPlacement() end
             end)
         end
@@ -1051,30 +1491,119 @@ function M:BuildSettings(page)
     })
     page:Hint("Hold Ctrl and left-drag the trinket box to reposition it.")
 
-    page:Header("Loot rolls")
-    page:Text("Adds a Loot Rolls section to the objectives frame listing the items your group most "
-        .. "recently rolled on. Click an item to see every player's choice. Rolls that are still open "
-        .. "stay expanded so you can see who has not answered yet; otherwise the roll that finished "
-        .. "most recently is the one shown expanded.")
+    page:Section({
+        title = "Stat display",
+        tooltip = "A movable text readout of the stats ticked below.",
+        get = function() return cfg.statText end,
+        set = function(v) cfg.statText = v end,
+        onChange = UpdateStats,
+    })
+    page:Text("Shows your stats as plain text on screen, each in its own colour. Tick the ones you "
+        .. "want -- Ascension is classless, so the useful set changes with the build. Hold Ctrl and "
+        .. "left-drag to move it.")
+
+    local STAT_LABELS = {
+        { option = "statStr",       label = "Strength" },
+        { option = "statAgi",       label = "Agility" },
+        { option = "statSta",       label = "Stamina" },
+        { option = "statInt",       label = "Intellect" },
+        { option = "statSpi",       label = "Spirit" },
+        { option = "statAP",        label = "Attack power" },
+        { option = "statSP",        label = "Spell power" },
+        { option = "statCrit",      label = "Melee crit %" },
+        { option = "statSpellCrit", label = "Spell crit %" },
+        { option = "statHit",       label = "Melee hit %" },
+        { option = "statSpellHit",  label = "Spell hit %" },
+        { option = "statExpertise", label = "Expertise" },
+    }
+    -- Three to a row: twelve stacked checks would make the section as long as the
+    -- flat page it replaced.
+    for i = 1, #STAT_LABELS, 3 do
+        local items = {}
+        for j = i, math.min(i + 2, #STAT_LABELS) do
+            local option = STAT_LABELS[j].option
+            items[#items + 1] = {
+                kind = "check", label = STAT_LABELS[j].label, width = 175,
+                get = function() return cfg[option] end,
+                set = function(v) cfg[option] = v end,
+                onChange = UpdateStats,
+            }
+        end
+        page:Row(items, { gap = 2 })
+    end
 
     page:Check({
-        label = "Show the loot rolls list",
-        tooltip = "Lists recent group loot rolls in the objectives frame.",
-        get = function() return cfg.lootRolls end,
-        set = function(v) cfg.lootRolls = v end,
-        onChange = RefreshLootRolls,
+        label = "Hide stats sitting at zero",
+        tooltip = "A stat with no value drops out of the list instead of taking up a line.",
+        get = function() return cfg.statHideZero end,
+        set = function(v) cfg.statHideZero = v end,
+        onChange = UpdateStats,
     })
 
     page:Check({
+        label = "Lock in place",
+        tooltip = "Locked, the readout takes no mouse input at all, so clicks pass straight through "
+            .. "it. Unlock it to move it with Ctrl + left-drag.",
+        get = function() return cfg.statLocked end,
+        set = function(v) cfg.statLocked = v end,
+        onChange = UpdateStats,
+    })
+
+    page:Dropdown({
+        label = "Layout", width = 150,
+        options = { { "vertical", "Vertical list" }, { "horizontal", "One row" } },
+        get = function() return cfg.statLayout end,
+        set = function(v) cfg.statLayout = v end,
+        onChange = UpdateStats,
+    })
+
+    page:Slider({
+        label = "Font size", width = 200,
+        min = 8, max = 24, step = 1,
+        get = function() return cfg.statFontSize or 12 end,
+        set = function(v) cfg.statFontSize = v end,
+        onChange = UpdateStats,
+    })
+
+    page:Section({
+        title = "Loot rolls",
+        tooltip = "Lists recent group loot rolls under the objectives frame.",
+        get = function() return cfg.lootRolls end,
+        set = function(v) cfg.lootRolls = v end,
+        onChange = RelayoutTracker,
+    })
+    page:Text("Adds a Loot Rolls section under the objectives frame listing the items your group most "
+        .. "recently rolled on, styled to match the tracker. Click an item to see every player's "
+        .. "choice. Rolls that are still open stay expanded so you can see who has not answered yet; "
+        .. "otherwise the roll that finished most recently is the one shown expanded.")
+
+    page:Check({
         label = "Attach to the objectives frame",
-        tooltip = "On: the list sits at the top of the quest tracker and pushes your quests down.\n\n"
+        tooltip = "On: the list sits underneath your tracked quests and follows them as they change.\n\n"
             .. "Off: the list becomes a free-floating box you can move with Ctrl + left-drag.",
         get = function() return cfg.lootRollsAttach end,
         set = function(v) cfg.lootRollsAttach = v end,
-        onChange = function()
-            PushTracker(0)          -- give the tracker its space back before re-anchoring
-            RefreshLootRolls()
-        end,
+        onChange = RelayoutTracker,
+    })
+
+    page:Check({
+        label = "Limit the quests the tracker lists",
+        tooltip = "Long quest lists push the loot rolls section down the screen. This caps how many "
+            .. "quests the objectives frame draws; the rest stay tracked, they're just not listed.\n\n"
+            .. "Only applies while the loot rolls list is on and attached.",
+        get = function() return cfg.lootRollsLimitQuests end,
+        set = function(v) cfg.lootRollsLimitQuests = v end,
+        onChange = RelayoutTracker,
+    })
+
+    page:Input({
+        label = "Quests to list", width = 80,
+        name = "HKSuiteLootRollsQuestLimitBox",
+        tooltip = "How many quests the objectives frame shows while the loot rolls list is attached.",
+        numeric = true, min = 1, max = 25, step = 1,
+        get = function() return cfg.lootRollsQuestLimit end,
+        set = function(v) cfg.lootRollsQuestLimit = v end,
+        onChange = RelayoutTracker,
     })
 
     page:Check({
@@ -1112,6 +1641,7 @@ function M:OnInit()
 
     BuildCross()
     BuildTrinketBox()
+    BuildStatBox()
     CompileLootPatterns()
     BuildLootRollsFrame()
 
@@ -1157,5 +1687,6 @@ function M:OnInit()
     end)
 
     UpdateTrinkets()
+    UpdateStats()
     RefreshLootRolls()
 end
