@@ -61,23 +61,7 @@ ns.defaults.automation = {
 
 local cfg  -- filled in OnInit
 
--- One-shot delayed call. Uses C_Timer when the client provides it, otherwise
--- falls back to a self-cancelling OnUpdate.
-local function After(delay, fn)
-    if C_Timer and C_Timer.After then
-        C_Timer.After(delay, fn)
-        return
-    end
-    local f = CreateFrame("Frame")
-    local elapsed = 0
-    f:SetScript("OnUpdate", function(self, e)
-        elapsed = elapsed + e
-        if elapsed >= delay then
-            self:SetScript("OnUpdate", nil)
-            fn()
-        end
-    end)
-end
+local After = ns.After
 
 -- ------------------------------------------------------------------ auto release
 -- A resurrect offer is up (someone is battle-rezzing us) -> don't auto-release.

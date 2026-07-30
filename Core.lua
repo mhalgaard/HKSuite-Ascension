@@ -4,7 +4,7 @@ local ADDON, ns = ...
 ns.name = "HKSuite"
 -- Fallback only: the settings window reads the .toc via GetAddOnMetadata, which
 -- the release workflow rewrites from the tag. Keep this in step with the .toc.
-ns.version = "2.1.0"
+ns.version = "2.2.0"
 ns.modules = {}
 ns.defaults = {}   -- modules populate this at file-load time
 
@@ -25,6 +25,34 @@ function ns.Print(msg)
     if gf and gf ~= DEFAULT_CHAT_FRAME then
         gf:AddMessage(text)
     end
+end
+
+-- One-shot delayed call, shared because several modules need to get out from
+-- under whatever called them before acting. C_Timer when the client provides it;
+-- otherwise an OnUpdate ticker off a small pool, since frames are never garbage
+-- collected and these fire often enough (every BoP loot, every vendor visit) for
+-- one-per-call to add up over a session.
+local timerPool = {}
+
+function ns.After(delay, fn)
+    if C_Timer and C_Timer.After then
+        C_Timer.After(delay, fn)
+        return
+    end
+
+    local f = table.remove(timerPool) or CreateFrame("Frame")
+    f.elapsed, f.delay, f.fn = 0, delay, fn
+    f:SetScript("OnUpdate", function(self, e)
+        self.elapsed = self.elapsed + e
+        if self.elapsed < self.delay then return end
+        local callback = self.fn
+        self.fn = nil
+        self:SetScript("OnUpdate", nil)
+        self:Hide()
+        timerPool[#timerPool + 1] = self
+        callback()
+    end)
+    f:Show()
 end
 
 -- Register a module table. Recognised fields:

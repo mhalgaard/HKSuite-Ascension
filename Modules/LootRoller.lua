@@ -100,16 +100,7 @@ local function ResolveAction(name, quality)
     return cfg.quality[quality]
 end
 
--- One-shot delayed call (C_Timer when available, else an OnUpdate fallback).
-local function After(delay, fn)
-    if C_Timer and C_Timer.After then C_Timer.After(delay, fn); return end
-    local f = CreateFrame("Frame")
-    local elapsed = 0
-    f:SetScript("OnUpdate", function(self, e)
-        elapsed = elapsed + e
-        if elapsed >= delay then self:SetScript("OnUpdate", nil); fn() end
-    end)
-end
+local After = ns.After
 
 -- Hide/release the group-loot window for a rollID. The default UI hides it in
 -- the roll buttons' OnClick; since we call RollOnLoot directly we must do it.
