@@ -169,7 +169,8 @@ Abandon unwanted quests in one click, keeping the ones you want:
 | Option | Default | What it does |
 |---|---|---|
 | Enable in-range tracker | Off | Shows a crosshair over your character — white when your target is in melee range, red when out of range. |
-| Enable trinket tracker | Off | Shows your equipped trinkets and their cooldowns in a box. Hold **Ctrl + left-drag** to move it. |
+| Enable trinket tracker | Off | Shows your equipped trinkets and their cooldowns in a box, greyed out while on cooldown. Hold **Ctrl + left-drag** to move it. |
+| └ Show the countdown number | **On** | The number ticking down over the icon. Off, the cooldown sweep remains — handy if another addon already puts timers on cooldowns. |
 | Enable stat display | Off | Your stats as plain text on screen, one colour each — Str/AP red, Agi/crit green, Int/SP blue, Spirit white, Stamina gold, hit orange, expertise purple. Hold **Ctrl + left-drag** to move it. |
 | └ Strength / Agility / Stamina / Intellect / Spirit | Sta off, rest on | Per-stat toggles for the primary stats. |
 | └ Attack power / Spell power | **On** | Melee attack power; spell power is the best school, as the paper doll shows it. |
