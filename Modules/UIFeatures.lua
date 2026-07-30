@@ -4,8 +4,8 @@ local ADDON, ns = ...
 -- UI Features module: small on-screen combat helpers.
 --   * In-range tracker  â€” a crosshair over the character, white when the target
 --     is in melee range, red when it's out of range.
---   * Trinket tracker   â€” a movable box showing your equipped trinkets and their
---     cooldowns (move with Ctrl + left-drag).
+--   * Trinket tracker   â€” a movable box showing your equipped trinkets, greyed
+--     out while on cooldown (move with Ctrl + left-drag).
 --   * Stat display      â€” your stats as plain text on screen, one toggle per
 --     line, laid out as a column or a row.
 --   * Loot rolls        â€” a "Loot Rolls" section under the objectives tracker's
@@ -23,6 +23,7 @@ ns.defaults.uifeatures = {
     rangeTracker   = false,
     rangeSpell     = "",       -- optional: exact ability name to range-check with
     trinketTracker = false,
+    trinketTimerText = true,   -- numeric countdown over the icon (the sweep stays either way)
     trinketPos     = { "CENTER", "CENTER", 0, -160 },  -- point, relPoint, x, y
 
     -- Stat display: one toggle per line, so a build only lists what it uses.
@@ -197,6 +198,55 @@ local function FormatTime(r)
     return tostring(math.ceil(r))
 end
 
+-- Seconds left on a slot's cooldown, or nil when it's ready.
+local function TrinketCooldown(slot)
+    local start, duration, enable = GetInventoryItemCooldown("player", slot)
+    if enable ~= 1 or not duration or duration <= 0 or not start or start <= 0 then return end
+    local remaining = start + duration - GetTime()
+    if remaining <= 0 then return end
+    return remaining, start, duration
+end
+
+-- Desaturating is the "not ready yet" cue. A slight dim rides along with it, so
+-- the state still reads on hardware that refuses to desaturate -- SetDesaturated
+-- is a silent no-op there rather than an error. Guarded on the current state
+-- because both the events and the ticker come through here.
+local function SetIconReady(icon, ready)
+    if icon.ready == ready then return end
+    icon.ready = ready
+    icon.texture:SetDesaturated(not ready and 1 or nil)
+    local tint = ready and 1 or 0.7
+    icon.texture:SetVertexColor(tint, tint, tint)
+end
+
+local function TickTrinkets(self, elapsed)
+    self.elapsed = (self.elapsed or 0) + elapsed
+    if self.elapsed < 0.1 then return end
+    self.elapsed = 0
+
+    -- Deliberately no SetCooldown here: re-stamping it every tick restarts the
+    -- sweep. The ticker exists to count the number down and to notice the moment
+    -- a cooldown ends, which no event reliably reports.
+    local ticking = false
+    for i, slot in ipairs(SLOTS) do
+        local icon = icons[i]
+        if icon.texture:IsShown() then
+            local remaining = TrinketCooldown(slot)
+            if remaining then
+                icon.text:SetText(cfg.trinketTimerText and FormatTime(remaining) or "")
+                SetIconReady(icon, false)
+                ticking = true
+            else
+                icon.text:SetText("")
+                SetIconReady(icon, true)
+            end
+        end
+    end
+
+    -- Nothing left to count: stop until an event says a cooldown has started.
+    if not ticking then self:SetScript("OnUpdate", nil) end
+end
+
 local function UpdateTrinkets()
     if not trinketBox then return end
     if not (enabled() and cfg.trinketTracker) then
@@ -204,24 +254,34 @@ local function UpdateTrinkets()
         return
     end
     trinketBox:Show()
+
+    local ticking = false
     for i, slot in ipairs(SLOTS) do
         local icon = icons[i]
         local tex = GetInventoryItemTexture("player", slot)
         if tex then
             icon.texture:SetTexture(tex)
             icon.texture:Show()
-            local start, duration, enable = GetInventoryItemCooldown("player", slot)
-            if enable == 1 and duration and duration > 0 and start > 0 then
-                icon.cd:SetCooldown(start, duration)
-            else
-                icon.cd:SetCooldown(0, 0)
-                icon.text:SetText("")
-            end
         else
             icon.texture:Hide()      -- empty slot: keep the frame (so the box stays draggable)
+        end
+
+        local remaining, start, duration = TrinketCooldown(slot)
+        if tex and remaining then
+            icon.cd:SetCooldown(start, duration)
+            icon.text:SetText(cfg.trinketTimerText and FormatTime(remaining) or "")
+            SetIconReady(icon, false)
+            ticking = true
+        else
             icon.cd:SetCooldown(0, 0)
             icon.text:SetText("")
+            SetIconReady(icon, true)
         end
+    end
+
+    if ticking then
+        trinketBox.elapsed = 0
+        trinketBox:SetScript("OnUpdate", TickTrinkets)
     end
 end
 
@@ -279,25 +339,8 @@ local function BuildTrinketBox()
         icons[i] = holder
     end
 
-    -- Numeric cooldown countdown (the sweep alone has no number in 3.3.5).
-    trinketBox:SetScript("OnUpdate", function(self, e)
-        self.elapsed = (self.elapsed or 0) + e
-        if self.elapsed < 0.1 then return end
-        self.elapsed = 0
-        for i, slot in ipairs(SLOTS) do
-            local icon = icons[i]
-            if icon.texture:IsShown() then
-                local start, duration, enable = GetInventoryItemCooldown("player", slot)
-                if enable == 1 and duration and duration > 0 and start > 0 then
-                    local r = start + duration - GetTime()
-                    icon.text:SetText(r > 0 and FormatTime(r) or "")
-                else
-                    icon.text:SetText("")
-                end
-            end
-        end
-    end)
-
+    -- The ticker is attached only while something is actually on cooldown; see
+    -- UpdateTrinkets. Nothing polls when both trinkets are ready.
     trinketBox:Hide()
 end
 
@@ -1482,13 +1525,25 @@ function M:BuildSettings(page)
     page:OnRefresh(function() saved:SetText(SavedText()) end)
 
     page:Header("Trinket tracker")
-    page:Check({
+    local trinkets = page:Check({
         label = "Enable trinket tracker",
         tooltip = "Shows your equipped trinkets and their cooldowns in a box.",
         get = function() return cfg.trinketTracker end,
         set = function(v) cfg.trinketTracker = v end,
         onChange = UpdateTrinkets,
     })
+
+    trinkets:BindChildren({
+        page:Check({
+            label = "Show the countdown number", indent = true,
+            tooltip = "The number counting down over the icon. Off, the cooldown sweep is still "
+                .. "there -- useful if you already run an addon that puts a timer on cooldowns.",
+            get = function() return cfg.trinketTimerText end,
+            set = function(v) cfg.trinketTimerText = v end,
+            onChange = UpdateTrinkets,
+        }),
+    })
+
     page:Hint("Hold Ctrl and left-drag the trinket box to reposition it.")
 
     page:Section({
