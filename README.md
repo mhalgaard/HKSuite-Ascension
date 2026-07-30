@@ -149,6 +149,9 @@ A movable square **HK** button near the minimap consolidates other addons'
 minimap buttons into one flyout. **Click** opens the menu, **Shift+click** opens
 HKSuite options, **Shift+CTRL+right-click** clears quests (per Clear Quests
 settings), and **CTRL+drag** moves it.
+
+The flyout closes itself 5 seconds after the mouse leaves it (the button counts
+as part of the menu, and the timer restarts every time you move back in).
 </details>
 
 <details>

@@ -3,7 +3,7 @@ local ADDON, ns = ...
 -- =============================================================================
 -- Addon Button module.
 -- A movable square "HK" button opens a flyout that consolidates other addons'
--- minimap buttons.
+-- minimap buttons. The flyout closes itself five seconds after the mouse leaves.
 -- =============================================================================
 
 local M = ns.RegisterModule({
@@ -66,6 +66,38 @@ local function AnchorMenu()
     menu:SetPoint("TOPRIGHT", button, "TOPLEFT", -4, 0)   -- flyout from the button
 end
 
+-- ------------------------------------------------------------- auto-close
+-- The flyout shuts itself once the mouse has been away for a while. Polled from
+-- the menu's own OnUpdate rather than off OnLeave handlers: the buttons inside it
+-- belong to other addons, which set their own scripts, and hooking every one of
+-- them to notice a hover would be far more fragile than a rectangle check. It
+-- also costs nothing while the menu is closed, since OnUpdate doesn't run on a
+-- hidden frame.
+local AUTO_CLOSE = 5   -- seconds away from the menu before it closes
+
+local function CursorOver(frame)
+    if frame.IsMouseOver then return frame:IsMouseOver() end
+    return MouseIsOver and MouseIsOver(frame) and true or false
+end
+
+-- The button counts as part of the menu, so the 4px gap between them isn't a
+-- reason to start counting down.
+local function CursorInMenuArea()
+    return CursorOver(menu) or CursorOver(button)
+end
+
+local function MenuAutoClose(self, elapsed)
+    if CursorInMenuArea() then
+        self.idle = 0            -- back inside: start the five seconds over
+        return
+    end
+    self.idle = (self.idle or 0) + elapsed
+    if self.idle >= AUTO_CLOSE then
+        self.idle = 0
+        self:Hide()
+    end
+end
+
 local function ToggleMenu()
     if not ns.IsModuleEnabled("addonbutton") then return end
     if menu:IsShown() then
@@ -73,6 +105,7 @@ local function ToggleMenu()
     else
         LayoutMenu()
         AnchorMenu()
+        menu.idle = 0
         menu:Show()
     end
 end
@@ -103,6 +136,7 @@ local function CreateWidgets()
     menu:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
     menu:SetFrameStrata("DIALOG")   -- position set dynamically in AnchorMenu
     menu:SetClampedToScreen(true)
+    menu:SetScript("OnUpdate", MenuAutoClose)
     menu:Hide()
     menu.empty = menu:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     menu.empty:SetPoint("CENTER")
@@ -193,6 +227,7 @@ function M:BuildSettings(page)
 
     page:Hint("Click the button for the addon menu, shift+click to open these settings, "
         .. "shift+CTRL+right-click to clear quests, CTRL+drag to move it.")
+    page:Hint("The menu closes itself 5 seconds after the mouse leaves it.")
 end
 
 -- The rail switch has to reach the button itself, which only re-reads its state
