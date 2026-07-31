@@ -2,8 +2,10 @@ local ADDON, ns = ...
 
 -- =============================================================================
 -- Auto Summon Premium Pets module.
--- Faithful port of the Ascension WeakAura (rev 17). Exception requested by user:
--- Wondrous Wisdomball is only summoned in NORMAL-difficulty dungeons.
+-- Faithful port of the Ascension WeakAura (rev 17). Exceptions requested by user:
+--   * Wondrous Wisdomball is only summoned in NORMAL-difficulty dungeons.
+--   * With the Loot-Transfigurator owned, a raid summons Fix-o-Tron (repairs)
+--     rather than the Lootbot the WeakAura asked for.
 -- =============================================================================
 
 local M = ns.RegisterModule({
@@ -142,32 +144,60 @@ local function canAttemptSummon()
     return true
 end
 
-local LOOTBOT = "Lootbot 3000"
+local LOOTBOT   = "Lootbot 3000"
+local REPAIRBOT = "Fix-o-Tron"      -- "Fix-o-Tron 5000" in game; matched as a substring
 
--- With the Loot-Transfigurator owned the Lootbot adds nothing, so it is replaced
--- wherever a context asks for it -- the surrounding priority is untouched, the
--- Lootbot's slot in it just goes to something else. Your safe-zone pet takes that
--- slot if you have named one, otherwise Fix-o-Tron does.
+-- The Loot-Transfigurator is an ITEM (item:190190, "Loot-Transfigurator 5000"),
+-- not a companion. The ownership gate here used to be findPetIndex(), which walks
+-- the CRITTER companion list -- so it could never match, the substitution never
+-- ran, and every context kept summoning the Lootbot. The setting itself is now
+-- what decides; the item id is only used to report what we can see in the
+-- settings page, since an unlock consumed on use would leave nothing to find.
+local LOOT_TRANSFIGURATOR_ITEM = 190190
+
+local function transfiguratorInBags()
+    if type(GetItemCount) ~= "function" then return false end
+    local ok, n = pcall(GetItemCount, LOOT_TRANSFIGURATOR_ITEM, true)   -- include bank
+    return ok and (n or 0) > 0
+end
+
+-- Which pet takes the Lootbot's place. In a raid it is always the repair bot --
+-- repairing mid-raid is the whole point of having it out, whatever pet you prefer
+-- while resting. Everywhere else your safe-zone pet wins if you named one.
+local function lootbotStandIn()
+    if IsInInstance() then
+        local _, instanceType = GetInstanceInfo()
+        if instanceType == "raid" then return REPAIRBOT end
+    end
+    if cfg.safeZonePet and cfg.safeZonePet ~= "" then return cfg.safeZonePet end
+    return REPAIRBOT
+end
+
+-- With the Loot-Transfigurator owned the Lootbot adds nothing, so the pet you'd
+-- rather have goes in ahead of it wherever a context asks for the Lootbot. The
+-- Lootbot stays on at the back as a fallback, so a character that doesn't own the
+-- stand-in still gets a pet instead of none.
 --
 -- This used to be `table.remove(list, 1)` on the open-world list, which was wrong
 -- twice over: it never applied in Manastorm, dungeons or raids, and while
 -- levelling position 1 is the Book of Ascension, so it dropped the Book and left
 -- the Lootbot in place.
-local function substituteLootbot(list)
-    if not (cfg.lootTrans and findPetIndex("Loot-Transfigurator")) then return list end
+local function preferOverLootbot(list)
+    if not cfg.lootTrans then return list end
 
-    local replacement = cfg.safeZonePet
-    if not replacement or replacement == "" then replacement = "Fix-o-Tron" end
-
-    -- The replacement is often already further down the list, so de-duplicate as
-    -- we go and let it keep the earlier (Lootbot's) position.
+    local standIn = lootbotStandIn()
+    -- The stand-in is often already further down the list, so de-duplicate as we
+    -- go and let it keep the earlier (Lootbot's) position.
     local out, seen = {}, {}
-    for _, name in ipairs(list) do
-        local pick = (name == LOOTBOT) and replacement or name
-        if not seen[pick] then
-            seen[pick] = true
-            out[#out + 1] = pick
+    local function add(name)
+        if not seen[name] then
+            seen[name] = true
+            out[#out + 1] = name
         end
+    end
+    for _, name in ipairs(list) do
+        if name == LOOTBOT then add(standIn) end
+        add(name)
     end
     return out
 end
@@ -217,7 +247,7 @@ local function contextPriorityList()
 end
 
 local function buildPriorityList()
-    return substituteLootbot(contextPriorityList())
+    return preferOverLootbot(contextPriorityList())
 end
 
 -- Summon the highest-priority owned pet for the current context.
@@ -274,15 +304,28 @@ function M:BuildSettings(page)
         set = function(v) cfg.noResummon = v end,
     })
     page:Check({
-        label = "Skip Lootbot if Loot-Transfigurator is owned",
-        tooltip = "The Lootbot adds nothing once you own the Loot-Transfigurator, so its slot in "
-            .. "the priority goes to something else instead.\n\nEvery situation keeps its normal "
-            .. "priority; only the Lootbot is swapped out, for your safe-zone pet if you have "
-            .. "named one, otherwise Fix-o-Tron.",
+        label = "I own the Loot-Transfigurator 5000 (skip the Lootbot)",
+        tooltip = "The Lootbot adds nothing once you own the Loot-Transfigurator, so the pet you'd "
+            .. "rather have goes ahead of it in every situation.\n\nIn a raid that is always "
+            .. "Fix-o-Tron, so you have repairs with you. Elsewhere it is your safe-zone pet if you "
+            .. "named one, otherwise Fix-o-Tron.\n\nThe Lootbot stays on as a fallback, so you still "
+            .. "get a pet if you don't own the stand-in.",
         get = function() return cfg.lootTrans end,
         set = function(v) cfg.lootTrans = v end,
     })
-    page:Hint("Only takes effect while you actually own the Loot-Transfigurator.")
+
+    -- The Transfigurator is an item, and an unlock consumed on use would leave
+    -- nothing to look for -- so this setting is a declaration, not a detection.
+    -- Report what we can actually see, and leave the choice to you.
+    local function OwnStatus()
+        if transfiguratorInBags() then
+            return "|cff1eff00Loot-Transfigurator 5000 found on this character.|r"
+        end
+        return "|cffaaaaaaNot in your bags or bank on this character -- the tick above is what "
+            .. "counts, so leave it on if you own it anyway.|r"
+    end
+    local status = page:Hint(OwnStatus())
+    page:OnRefresh(function() status:SetText(OwnStatus()) end)
 
     page:Spacer(6)
     page:Slider({
@@ -298,7 +341,8 @@ function M:BuildSettings(page)
         label = "Safe-zone pet (name)",
         name = "HKSuitePetSafeZone", width = 200,
         tooltip = "Summoned instead of the usual priority while resting or AFK in a safe zone.\n\n"
-            .. "Also stands in for the Lootbot everywhere, if the option above is on.\n\n"
+            .. "Also stands in for the Lootbot outside raids, if the option above is on. In a raid "
+            .. "the stand-in is always Fix-o-Tron.\n\n"
             .. "Matched as a substring, so part of the name is enough.",
         get = function() return cfg.safeZonePet or "" end,
         set = function(v) cfg.safeZonePet = v end,
@@ -310,14 +354,15 @@ function M:BuildSettings(page)
     page:Text(
         "• Manastorm:  Cogsley (Eye of the Manastorm)  >  Lootbot 3000\n" ..
         "• Dungeon (Normal):  Wisdomball (first 15s of the run or right after an LFG completion)  >  Lootbot 3000\n" ..
-        "• Raid:  Lootbot 3000\n" ..
+        "• Raid:  Fix-o-Tron (with the Loot-Transfigurator ticked)  >  Lootbot 3000\n" ..
         "• Open world:  Lootbot 3000  >  Book of Ascension  >  Treasure Keeper  >  Fix-o-Tron\n" ..
         "• While leveling (before your first LFG completion):  Book of Ascension leads\n" ..
         "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension"
     )
-    page:Text("With \"Skip Lootbot\" on and the Loot-Transfigurator owned, every Lootbot 3000 above "
-        .. "becomes your safe-zone pet (or Fix-o-Tron if you haven't named one). Nothing else about "
-        .. "the order changes.")
+    page:Text("With the Loot-Transfigurator ticked above, a stand-in goes in ahead of every "
+        .. "Lootbot 3000 in that list -- Fix-o-Tron in a raid, your safe-zone pet (or Fix-o-Tron) "
+        .. "anywhere else. The Lootbot keeps its place behind the stand-in as a fallback, and "
+        .. "nothing else about the order changes.")
     page:Hint("Wisdomball is only used in Normal dungeons, never Heroic/Mythic.")
 end
 
