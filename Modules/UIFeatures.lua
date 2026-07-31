@@ -9,14 +9,16 @@ local ADDON, ns = ...
 --   * Stat display      â€” your stats as plain text on screen, one toggle per
 --     line, laid out as a column or a row.
 --   * Loot rolls        â€” a "Loot Rolls" section under the objectives tracker's
---     quests, styled like one of its own blocks, listing recently rolled items
---     and expandable to each player's choice.
+--     quests, styled like one of its own blocks, one line per item: the top roll
+--     and how much of the group has answered.
+--   * Path reminder     â€” a warning over the character while no Path (primary
+--     stat) is applied.
 -- =============================================================================
 
 local M = ns.RegisterModule({
     key   = "uifeatures",
     title = "UI Features",
-    desc  = "In-range crosshair, trinket cooldown tracker, on-screen stat readout, and a loot rolls list on the objectives frame.",
+    desc  = "In-range crosshair, trinket cooldown tracker, on-screen stat readout, a loot rolls list on the objectives frame, and a missing-Path warning.",
 })
 
 ns.defaults.uifeatures = {
@@ -40,14 +42,20 @@ ns.defaults.uifeatures = {
     statExpertise = true,
 
     lootRolls           = false,
-    lootRollsMax        = 4,     -- how many recent items the section lists
+    lootRollsNeedOnly   = true,  -- only list rolls you answered Need on
+    lootRollsMax        = 5,     -- how many recent items the section lists
     lootRollsHideAfter  = 120,   -- hide the section this long after the last roll ended (0 = never)
-    lootRollsShowPass   = true,  -- list players who passed
     lootRollsAttach     = true,  -- sit under the objectives tracker (else a free-floating box)
     lootRollsCollapsed  = false, -- section collapsed to just its header
     lootRollsLimitQuests = true, -- cap the tracker's quest list so the section stays in view
     lootRollsQuestLimit  = 5,
     lootRollsPos        = { "TOPRIGHT", "TOPRIGHT", -220, -260 },
+
+    -- Path reminder: warn while the character has no Path (primary stat) applied.
+    pathReminder     = false,
+    pathReminderText = "No Path selected!",
+    pathReminderY    = 100,      -- pixels above screen centre, i.e. above your character
+    pathReminderSize = 18,
 }
 
 local cfg  -- filled in OnInit
@@ -607,10 +615,14 @@ end
 -- everyone who has answered. Players who cannot loot the item auto-pass, so they
 -- resolve on their own; players out of the loot group simply never answer and
 -- stay listed as waiting until the roll times out.
+--
+-- The section is one line per item: the top roll and how many of the group have
+-- answered, rather than a row per player. The per-player breakdown moved into
+-- the item's tooltip, which costs no space in the tracker.
 
 local LR_PAD, LR_DEFAULT_W = 3, 204    -- LR_DEFAULT_W = WATCHFRAME_EXPANDEDWIDTH
-local LR_TOGGLE_X = 0                  -- the +/- sits where a quest title starts
-local LR_INDENT   = 13                 -- icon / dash column, clear of the +/-
+local LR_TOGGLE_X = 0                  -- the header's +/- sits where a quest title starts
+local LR_INDENT   = 13                 -- header text / item icon column, clear of the +/-
 
 -- Roll choices, in the order group loot numbers them.
 local VOTE = {
@@ -632,6 +644,16 @@ local lootFrame, lrRows, lrHeader
 local trackerCollapsed = false
 
 local RefreshLootRolls   -- forward declaration (event handlers call it)
+
+-- Loot traffic arrives in bursts: one roll in a 25-man is up to 25 chat lines of
+-- choices and another 25 of roll numbers, and a boss drops several items at once.
+-- Redrawing on each line meant a full relayout -- font probe, tracker measure, and
+-- per-row text fitting -- several hundred times inside a couple of seconds, which
+-- is what made looting stutter. Event handlers now only mark the section dirty and
+-- the ticker redraws it at most four times a second. Anything you do yourself (the
+-- header, a setting) still redraws on the spot.
+local lrDirty = false
+local function MarkLootRolls() lrDirty = true end
 
 -- Turn a GlobalStrings format ("%s has selected Need for: %s") into a Lua
 -- pattern. Placeholders go in as control bytes first so the (%d+) we inject for
@@ -784,7 +806,10 @@ end
 
 -- Group loot awards to the highest Need roll if there is one, else the highest
 -- Greed/Disenchant roll -- so that's how we pick the winner from the numbers.
-local function Winner(rec)
+-- On a roll that is still open this is the current leader: whoever would take the
+-- item if it closed now. (3.3.5 normally broadcasts the numbers only as the roll
+-- closes, so an open roll usually has none yet and this returns nothing.)
+local function TopRoll(rec)
     if rec.wonBy then return rec.wonBy, rec.rollNums[rec.wonBy] end
     local bestName, bestNum, bestNeed
     for name, num in pairs(rec.rollNums) do
@@ -798,7 +823,7 @@ local function Winner(rec)
 end
 
 local function TrimRolls()
-    local keep = math.max(1, tonumber(cfg.lootRollsMax) or 4) * 3
+    local keep = math.max(1, tonumber(cfg.lootRollsMax) or 5) * 3
     for i = #rolls, keep + 1, -1 do
         local rec = rolls[i]
         if rec.rollID then rollByID[rec.rollID] = nil end
@@ -823,7 +848,7 @@ local function StartRoll(rollID, rollTime)
     table.insert(rolls, 1, rec)
     rollByID[rollID] = rec
     TrimRolls()
-    RefreshLootRolls()
+    MarkLootRolls()
 end
 
 -- Character names never contain a space, so a captured "name" that does means we
@@ -848,7 +873,7 @@ local function RecordVote(link, playerName, vote)
     end
     rec.votes[playerName] = vote
     CheckComplete(rec)
-    RefreshLootRolls()
+    MarkLootRolls()
 end
 
 local function RecordRolled(link, playerName, num, vote)
@@ -858,7 +883,7 @@ local function RecordRolled(link, playerName, num, vote)
     if rec.votes[playerName] == nil then RecordVote(link, playerName, vote) end
     rec.rollNums[playerName] = num
     Finish(rec)
-    RefreshLootRolls()
+    MarkLootRolls()
 end
 
 local function RecordWinner(link, playerName)
@@ -868,7 +893,7 @@ local function RecordWinner(link, playerName)
     if not rec or not rec.finished or rec.wonBy then return end
     if GetTime() - rec.finished > 20 then return end
     rec.wonBy = playerName
-    RefreshLootRolls()
+    MarkLootRolls()
 end
 
 local function HandleLootMessage(msg)
@@ -881,7 +906,7 @@ local function HandleLootMessage(msg)
                 if m.me then player = UnitName("player") end
                 if m.allPassed then
                     local rec = FindRoll(link, nil, true)
-                    if rec then rec.allPassed = true; Finish(rec); RefreshLootRolls() end
+                    if rec then rec.allPassed = true; Finish(rec); MarkLootRolls() end
                 elseif m.won then
                     RecordWinner(link, player)
                 elseif m.rolled then
@@ -936,7 +961,6 @@ end
 local function ApplyTrackerFont(row)
     SetRowFont(row.left)
     SetRowFont(row.right)
-    SetRowFont(row.dash)
 end
 
 -- Re-reads the tracker's font and pushes it onto the section. A no-op unless
@@ -965,32 +989,77 @@ local function ToggleTexture(expanded)
 end
 
 -- ------------------------------------------------------------------ display
--- Pending rolls open themselves so you can see who is still missing; once
--- nothing is pending, the roll that finished most recently opens instead.
-local function IsExpanded(rec, newestFinished, anyPending)
-    if rec.userExpanded ~= nil then return rec.userExpanded end
-    if not rec.finished then return true end
-    return (not anyPending) and rec == newestFinished
-end
-
 -- FontStrings in 3.3.5 wrap instead of eliding, so trim to fit by hand.
+--
+-- Every probe is a SetText plus a GetStringWidth, and each of those makes the
+-- client lay the string out again -- so dropping one character at a time cost
+-- twenty-odd layouts per row that needed trimming, on every redraw. Halving the
+-- range gets there in about five, and a name that already fits (the common case)
+-- costs one.
 local function SetTruncated(fs, text, maxWidth)
-    fs:SetText(text or "")
+    text = text or ""
+    fs:SetText(text)
     if not maxWidth or maxWidth <= 0 then return end
-    local s = text or ""
-    while #s > 1 and fs:GetStringWidth() > maxWidth do
-        s = s:sub(1, #s - 1)
-        fs:SetText(s .. "...")
+    if fs:GetStringWidth() <= maxWidth then return end
+
+    local lo, hi, best = 1, #text, ""
+    while lo <= hi do
+        local mid = math.floor((lo + hi) / 2)
+        -- Never cut inside a multi-byte character, or the tail renders as junk.
+        -- The bounds still move by `mid`, so backing the cut up can't stall the
+        -- search; it only ever settles a character or two short.
+        local cut = mid
+        while cut > 1 do
+            local nextByte = text:byte(cut + 1)
+            if not nextByte or nextByte < 0x80 or nextByte > 0xBF then break end
+            cut = cut - 1
+        end
+        local candidate = text:sub(1, cut) .. "..."
+        fs:SetText(candidate)
+        if fs:GetStringWidth() <= maxWidth then
+            best = candidate
+            lo = mid + 1
+        else
+            hi = mid - 1
+        end
     end
+    fs:SetText(best)
 end
 
 -- The tracker highlights an entry by turning its title gold rather than by
 -- painting a bar behind it, so that's what a hovered item row does too.
+-- Everyone who answered, in the order they did, then anyone still to roll. This
+-- is the detail the expandable player rows used to carry.
+local function AddRollLines(rec)
+    if not rec then return end
+    GameTooltip:AddLine(" ")
+    local seen = {}
+    for _, name in ipairs(rec.order) do
+        if not seen[name] then
+            seen[name] = true
+            local v = VOTE[rec.votes[name]] or VOTE[0]
+            local num = rec.rollNums[name]
+            local r, g, b = ClassColor(rec.classes[name])
+            GameTooltip:AddDoubleLine(name, num and (v.short .. " " .. num) or v.short,
+                r, g, b, v.color[1], v.color[2], v.color[3])
+        end
+    end
+    if rec.finished then return end
+    for _, name in ipairs(rec.candidates) do
+        if rec.votes[name] == nil then
+            GameTooltip:AddDoubleLine(name, "waiting",
+                DIM_COLOR[1], DIM_COLOR[2], DIM_COLOR[3],
+                WAITING_COLOR[1], WAITING_COLOR[2], WAITING_COLOR[3])
+        end
+    end
+end
+
 local function RowOnEnter(self)
     self.left:SetTextColor(unpack(HIGHLIGHT_COLOR))
     if not self.link then return end
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:SetHyperlink(self.link)
+    AddRollLines(self.rec)
     GameTooltip:Show()
 end
 
@@ -1001,14 +1070,11 @@ end
 
 local function RowOnClick(self)
     local rec = self.rec
-    if not rec then return end
-    if IsShiftKeyDown() and rec.link and ChatEdit_InsertLink then
+    if not (rec and rec.link) then return end
+    if IsShiftKeyDown() and ChatEdit_InsertLink then
         ChatEdit_InsertLink(rec.link)
-    elseif IsControlKeyDown() and rec.link and DressUpItemLink then
+    elseif IsControlKeyDown() and DressUpItemLink then
         DressUpItemLink(rec.link)
-    else
-        rec.userExpanded = not self.expanded
-        RefreshLootRolls()
     end
 end
 
@@ -1020,21 +1086,14 @@ local function GetRow(i)
     row:SetPoint("LEFT", lootFrame, "LEFT", 0, 0)
     row:SetPoint("RIGHT", lootFrame, "RIGHT", 0, 0)
 
-    row.toggle = row:CreateTexture(nil, "ARTWORK")
-    row.toggle:SetPoint("LEFT", LR_TOGGLE_X, 0)
-
+    -- The icon sits in the column the header's text starts in, so items read as
+    -- entries under the header the way quest titles do in the tracker.
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetPoint("LEFT", LR_INDENT, 0)
     row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    -- Objective lines in the tracker are a dash in its own column with the text
-    -- beside it; player rows are laid out the same way. The font object is only a
-    -- starting point -- ApplyTrackerFont swaps in whatever the tracker is using.
-    row.dash = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    row.dash:SetPoint("LEFT", LR_INDENT, 0)
-    row.dash:SetJustifyH("LEFT")
-    row.dash:SetTextColor(unpack(DIM_COLOR))
-
+    -- The font object is only a starting point -- ApplyTrackerFont swaps in
+    -- whatever the tracker is using.
     row.left = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     row.left:SetJustifyH("LEFT")
 
@@ -1051,45 +1110,45 @@ local function GetRow(i)
     return row
 end
 
-local function LayoutItemRow(row, rec, y, width, expanded)
+-- The right column carries the whole state of the roll in one line:
+--   open, no numbers yet   "3/5  38s"      answered out of the group, time left
+--   numbers in, still open "Bob 87  3/5"   who leads, and the progress
+--   closed                 "Bob 87"        the winning roll
+local function RightText(rec)
+    if rec.allPassed then
+        return "all passed", DIM_COLOR[1], DIM_COLOR[2], DIM_COLOR[3]
+    end
+    local progress = Responded(rec) .. "/" .. #rec.candidates
+    local top, num = TopRoll(rec)
+    if top then
+        local text = num and (top .. " " .. num) or top
+        if not rec.finished then text = text .. "  " .. progress end
+        local r, g, b = ClassColor(rec.classes[top] or LookupClass(top))
+        return text, r, g, b
+    end
+    if rec.finished then
+        return "done", DIM_COLOR[1], DIM_COLOR[2], DIM_COLOR[3]
+    end
+    local left = math.max(0, math.ceil(rec.deadline - GetTime()))
+    return progress .. "  " .. left .. "s",
+        WAITING_COLOR[1], WAITING_COLOR[2], WAITING_COLOR[3]
+end
+
+local function LayoutItemRow(row, rec, y, width)
     local lineH = TrackerLineHeight()
     row:SetHeight(lineH)
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", lootFrame, "TOPLEFT", 0, y)
     row:SetPoint("TOPRIGHT", lootFrame, "TOPRIGHT", 0, y)
-    row.rec, row.link, row.expanded = rec, rec.link, expanded
+    row.rec, row.link = rec, rec.link
     row:EnableMouse(true)
 
     local iconSize = lineH - 4
-    row.toggle:SetSize(iconSize, iconSize)
-    row.toggle:SetTexture(ToggleTexture(expanded))
-    row.toggle:Show()
     row.icon:SetSize(iconSize, iconSize)
     row.icon:SetTexture(rec.texture)
     row.icon:Show()
-    row.dash:Hide()
 
-    -- Right column: progress + countdown while open, the outcome once closed.
-    local rightText, rc, rg, rb
-    if rec.finished then
-        if rec.allPassed then
-            rightText = "all passed"
-            rc, rg, rb = unpack(DIM_COLOR)
-        else
-            local win, num = Winner(rec)
-            if win then
-                rightText = num and (win .. " " .. num) or win
-                rc, rg, rb = ClassColor(rec.classes[win] or LookupClass(win))
-            else
-                rightText = "done"
-                rc, rg, rb = unpack(DIM_COLOR)
-            end
-        end
-    else
-        local left = math.max(0, math.ceil(rec.deadline - GetTime()))
-        rightText = Responded(rec) .. "/" .. #rec.candidates .. "  " .. left .. "s"
-        rc, rg, rb = unpack(WAITING_COLOR)
-    end
+    local rightText, rc, rg, rb = RightText(rec)
     row.right:SetText(rightText)
     row.right:SetTextColor(rc, rg, rb)
 
@@ -1103,75 +1162,44 @@ local function LayoutItemRow(row, rec, y, width, expanded)
     SetTruncated(row.left, label, width - indent - row.right:GetStringWidth() - 6)
 end
 
-local function LayoutPlayerRow(row, rec, name, y, width)
-    row:SetHeight(TrackerLineHeight())
-    row:ClearAllPoints()
-    row:SetPoint("TOPLEFT", lootFrame, "TOPLEFT", 0, y)
-    row:SetPoint("TOPRIGHT", lootFrame, "TOPRIGHT", 0, y)
-    row.rec, row.link, row.expanded, row.baseR = nil, nil, nil, nil
-    row:EnableMouse(false)
-    row.toggle:Hide()
-    row.icon:Hide()
-    row.dash:SetText(_G.QUEST_DASH or " - ")
-    row.dash:Show()
-
-    local vote = rec.votes[name]
-    local rightText, rc, rg, rb
-    if vote then
-        local v = VOTE[vote]
-        local num = rec.rollNums[name]
-        rightText = num and (v.short .. " " .. num) or v.short
-        rc, rg, rb = unpack(v.color)
-    else
-        rightText = "waiting"
-        rc, rg, rb = unpack(WAITING_COLOR)
-    end
-    row.right:SetText(rightText)
-    row.right:SetTextColor(rc, rg, rb)
-
-    if vote then
-        row.left:SetTextColor(ClassColor(rec.classes[name]))
-    else
-        row.left:SetTextColor(unpack(DIM_COLOR))
-    end
-    local indent = LR_INDENT + math.ceil(row.dash:GetStringWidth())
-    row.left:ClearAllPoints()
-    row.left:SetPoint("LEFT", row, "LEFT", indent, 0)
-    SetTruncated(row.left, name, width - indent - row.right:GetStringWidth() - 6)
+-- Which rolls the section bothers with. Need-only is the default: a roll you
+-- passed or greeded resolves without you, so watching it is noise -- what you want
+-- on screen is whether the thing you actually asked for is coming your way. Note
+-- an item only appears once you've answered Need on it.
+local function IsRelevant(rec, me)
+    if not cfg.lootRollsNeedOnly then return true end
+    return me ~= nil and rec.votes[me] == 1        -- 1 = Need
 end
 
--- Answered first (in the order they answered), then everyone still missing.
-local function PlayerOrder(rec)
-    local list, seen = {}, {}
-    for _, name in ipairs(rec.order) do
-        if not seen[name] then
-            seen[name] = true
-            if cfg.lootRollsShowPass or rec.votes[name] ~= 0 then list[#list + 1] = name end
-        end
+-- Newest first, so the first match is the newest relevant roll. Kept allocation-
+-- free because the ticker asks four times a second.
+local function NewestRelevantRoll()
+    local me = UnitName("player")
+    for _, rec in ipairs(rolls) do
+        if IsRelevant(rec, me) then return rec end
     end
-    for _, name in ipairs(rec.candidates) do
-        if not seen[name] and rec.votes[name] == nil then
-            seen[name] = true
-            list[#list + 1] = name
-        end
-    end
-    return list
 end
 
 local function VisibleRolls()
-    local max = math.max(1, tonumber(cfg.lootRollsMax) or 4)
+    local max = math.max(1, tonumber(cfg.lootRollsMax) or 5)
+    local me = UnitName("player")
     local list = {}
-    for i = 1, math.min(#rolls, max) do list[i] = rolls[i] end
+    for _, rec in ipairs(rolls) do
+        if IsRelevant(rec, me) then
+            list[#list + 1] = rec
+            if #list >= max then break end
+        end
+    end
     return list
 end
 
 local function ShouldShow()
     if not (enabled() and cfg.lootRolls) then return false end
     if trackerCollapsed and cfg.lootRollsAttach then return false end
-    if #rolls == 0 then return false end
+    local newest = NewestRelevantRoll()
+    if not newest then return false end
     local hideAfter = tonumber(cfg.lootRollsHideAfter) or 0
     if hideAfter > 0 then
-        local newest = rolls[1]
         if newest.finished and (GetTime() - newest.finished) > hideAfter then return false end
     end
     return true
@@ -1205,6 +1233,11 @@ local function TrackerContentOffset()
     return lowest - top - TrackerBlockGap()
 end
 
+-- What the last call actually committed. Re-anchoring invalidates the frame's
+-- layout and every row inside it, and this runs from the tracker's own update hook
+-- as well as from each redraw -- so a placement that hasn't moved is skipped.
+local placedAttached, placedOffset, placedWidth, placedLevel
+
 local function ApplyPlacement()
     if not lootFrame then return end
     local lines = _G.WatchFrameLines
@@ -1214,19 +1247,33 @@ local function ApplyPlacement()
     -- section where it is rather than flinging it to the free-floating position.
     if attach and not offset then return end
 
-    lootFrame:ClearAllPoints()
     if offset then
+        local w = lines:GetWidth()
+        if not w or w < 60 then w = LR_DEFAULT_W end
+        -- The tracker's frame level is part of the key: something restyling the
+        -- tracker can move it without the offset or width changing, and we'd end up
+        -- drawing behind it.
+        local level = lines:GetFrameLevel()
+        if placedAttached and placedOffset == offset and placedWidth == w
+            and placedLevel == level and lootFrame:GetParent() == lines then
+            return
+        end
+        placedAttached, placedOffset, placedWidth, placedLevel = true, offset, w, level
+
+        lootFrame:ClearAllPoints()
         -- Parented to the tracker's line frame so we inherit its scale and go with
         -- it when something hides the whole tracker (ElvUI's boss-fight auto-hide).
         if lootFrame:GetParent() ~= lines then lootFrame:SetParent(lines) end
-        local w = lines:GetWidth()
-        if not w or w < 60 then w = LR_DEFAULT_W end
         lootFrame:SetWidth(w)
         lootFrame:SetPoint("TOPLEFT", lines, "TOPLEFT", 0, offset)
         lootFrame:SetFrameStrata(lines:GetFrameStrata())
-        lootFrame:SetFrameLevel(lines:GetFrameLevel() + 5)
+        lootFrame:SetFrameLevel(level + 5)
         lootFrame:EnableMouse(false)
     else
+        if placedAttached == false and lootFrame:GetParent() == UIParent then return end
+        placedAttached, placedOffset, placedWidth, placedLevel = false, nil, nil, nil
+
+        lootFrame:ClearAllPoints()
         if lootFrame:GetParent() ~= UIParent then lootFrame:SetParent(UIParent) end
         lootFrame:SetWidth(LR_DEFAULT_W)
         local p = cfg.lootRollsPos or {}
@@ -1282,8 +1329,13 @@ local function LimitTrackerQuests()
 
     -- A quest's item button and its map POI icon are anchored to its title line,
     -- so anything hanging off a line we just hid goes with it.
-    for i = 1, lines:GetNumChildren() do
-        local child = select(i, lines:GetChildren())
+    --
+    -- GetChildren() returns the whole list every call, so asking for it inside the
+    -- loop copied every child once per child. Fetch it once instead: this runs on
+    -- every WatchFrame_Update, which the tracker fires on any objective change.
+    local children = { lines:GetChildren() }
+    for i = 1, #children do
+        local child = children[i]
         if child:IsShown() and child:GetNumPoints() > 0 then
             local _, relative = child:GetPoint(1)
             if relative and hiddenLines[relative] then child:Hide() end
@@ -1327,28 +1379,12 @@ function RefreshLootRolls()
     if cfg.lootRollsCollapsed then
         for _, row in ipairs(lrRows) do row:Hide() end
     else
-        local anyPending, newestFinished = pending > 0, nil
         for _, rec in ipairs(visible) do
-            if rec.finished and not newestFinished then newestFinished = rec end
-        end
-
-        for _, rec in ipairs(visible) do
-            local expanded = IsExpanded(rec, newestFinished, anyPending)
             used = used + 1
             local row = GetRow(used)
-            LayoutItemRow(row, rec, y, width, expanded)
+            LayoutItemRow(row, rec, y, width)
             row:Show()
             y = y - lineH
-
-            if expanded then
-                for _, name in ipairs(PlayerOrder(rec)) do
-                    used = used + 1
-                    local prow = GetRow(used)
-                    LayoutPlayerRow(prow, rec, name, y, width)
-                    prow:Show()
-                    y = y - lineH
-                end
-            end
         end
         for i = used + 1, #lrRows do lrRows[i]:Hide() end
     end
@@ -1432,10 +1468,10 @@ local function BuildLootRollsFrame()
         self.elapsed = (self.elapsed or 0) + e
         if self.elapsed < 0.25 then return end
         self.elapsed = 0
-        if #rolls == 0 then return end
+        if #rolls == 0 then lrDirty = false return end
 
         local now = GetTime()
-        local dirty, pending = false, false
+        local dirty, pending = lrDirty, false
         for _, rec in ipairs(rolls) do
             if not rec.finished then
                 if now >= rec.deadline then
@@ -1455,8 +1491,97 @@ local function BuildLootRollsFrame()
         -- IsShown() is 1/nil here, so normalise before comparing.
         local shown = lootFrame:IsShown() and true or false
         if dirty or shown ~= ShouldShow() then
+            lrDirty = false
             RefreshLootRolls()
         end
+    end)
+end
+
+-- -------------------------------------------------------------- path reminder
+-- An Ascension character picks a Path, which is the primary stat it scales with:
+-- Strength, Agility, Intelligence, Healing or Duality. Forgetting to set one is
+-- easy and costs you the scaling, so this puts a warning over your character
+-- until a Path is applied.
+--
+-- The character sheet's own Path line is the source for how to read it -- see
+-- ElvUI_Enhanced's Modules/Blizzard/CharacterFrame.lua PrimaryStat(), which does
+--     local statID = C_PrimaryStat:GetActivePrimaryStat()
+--     local _, _, _, name = C_PrimaryStat:GetPrimaryStatInfo(statID)
+-- and prints "No Primary Stat" when statID comes back empty. Both are methods on
+-- the C_PrimaryStat table, so they take the table as self.
+--
+-- A client without C_PrimaryStat has no Paths to be missing, so an absent API
+-- means "can't tell" and the reminder stays quiet rather than warning forever.
+local PATH_NAME_RETURN = 4   -- GetPrimaryStatInfo -> spellID, ?, icon, name, tooltip
+
+-- Returns: hasPath, pathName, supported
+local function ActivePath()
+    local api = _G.C_PrimaryStat
+    if type(api) ~= "table" or type(api.GetActivePrimaryStat) ~= "function" then
+        return false, nil, false
+    end
+    local ok, id = pcall(api.GetActivePrimaryStat, api)
+    if not ok then return false, nil, false end
+    -- Empty means no Path. Nil is what the character sheet checks for; 0 is
+    -- covered too, in case the server ever answers that way instead.
+    if not id or id == 0 then return false, nil, true end
+
+    local name
+    if type(api.GetPrimaryStatInfo) == "function" then
+        local res = { pcall(api.GetPrimaryStatInfo, api, id) }
+        if res[1] then name = res[1 + PATH_NAME_RETURN] end
+    end
+    -- A Path whose name won't resolve is still a Path, so don't warn about it.
+    return true, name, true
+end
+
+local pathFrame
+
+local function UpdatePathReminder()
+    if not pathFrame then return end
+    if not (enabled() and cfg.pathReminder) then
+        pathFrame:Hide()
+        return
+    end
+    local hasPath, _, supported = ActivePath()
+    if hasPath or not supported then
+        pathFrame:Hide()
+        return
+    end
+
+    local file = GameFontNormal:GetFont()
+    local size = tonumber(cfg.pathReminderSize) or 18
+    pathFrame.text:SetFont(file, size, "OUTLINE")
+    local text = cfg.pathReminderText
+    if not text or text == "" then text = ns.defaults.uifeatures.pathReminderText end
+    pathFrame.text:SetText(text)
+    pathFrame:ClearAllPoints()
+    pathFrame:SetPoint("CENTER", UIParent, "CENTER", 0, tonumber(cfg.pathReminderY) or 100)
+    pathFrame:Show()
+end
+
+local function BuildPathReminder()
+    pathFrame = CreateFrame("Frame", "HKSuitePathReminder", UIParent)
+    pathFrame:SetSize(1, 1)                 -- the text sizes itself
+    pathFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
+    pathFrame:SetFrameStrata("MEDIUM")
+    pathFrame:Hide()
+
+    pathFrame.text = pathFrame:CreateFontString(nil, "OVERLAY")
+    pathFrame.text:SetPoint("CENTER")
+    pathFrame.text:SetTextColor(unpack(RED))
+    pathFrame.text:SetShadowOffset(1, -1)    -- it sits over the world
+    pathFrame.text:SetShadowColor(0, 0, 0, 1)
+
+    -- A Path is set once, at an NPC, and there's no event for it -- and the
+    -- Overview's module switch doesn't notify modules either. Both are covered by
+    -- re-checking on a slow tick; it's two API calls a second.
+    local poll = CreateFrame("Frame")
+    poll:SetScript("OnUpdate", function(self, e)
+        self.elapsed = (self.elapsed or 0) + e
+        if self.elapsed < 1 then return end
+        self.elapsed = 0
+        UpdatePathReminder()
     end)
 end
 
@@ -1627,10 +1752,21 @@ function M:BuildSettings(page)
         set = function(v) cfg.lootRolls = v end,
         onChange = RelayoutTracker,
     })
-    page:Text("Adds a Loot Rolls section under the objectives frame listing the items your group most "
-        .. "recently rolled on, styled to match the tracker. Click an item to see every player's "
-        .. "choice. Rolls that are still open stay expanded so you can see who has not answered yet; "
-        .. "otherwise the roll that finished most recently is the one shown expanded.")
+    page:Text("Adds a Loot Rolls section under the objectives frame listing the items you most "
+        .. "recently rolled Need on, styled to match the tracker. Each item takes one line, showing the "
+        .. "top roll so far and how many of the group have answered out of how many are in it. Hover "
+        .. "an item for the full breakdown of who chose what and who has yet to roll; shift-click to "
+        .. "link it in chat, ctrl-click to preview it.")
+
+    page:Check({
+        label = "Only list rolls you pressed Need on",
+        tooltip = "A roll you passed or greeded resolves without you, so it stays off the list. "
+            .. "What's left is just the items you actually asked for.\n\nAn item shows up once you've "
+            .. "answered Need on it, so nothing appears while you're still deciding.",
+        get = function() return cfg.lootRollsNeedOnly end,
+        set = function(v) cfg.lootRollsNeedOnly = v end,
+        onChange = RefreshLootRolls,
+    })
 
     page:Check({
         label = "Attach to the objectives frame",
@@ -1661,19 +1797,10 @@ function M:BuildSettings(page)
         onChange = RelayoutTracker,
     })
 
-    page:Check({
-        label = "List players who passed",
-        tooltip = "When off, players who passed are left out of the expanded list. They still count "
-            .. "towards the answered total.",
-        get = function() return cfg.lootRollsShowPass end,
-        set = function(v) cfg.lootRollsShowPass = v end,
-        onChange = RefreshLootRolls,
-    })
-
     page:Input({
         label = "Items to list", width = 80,
         name = "HKSuiteLootRollsMaxBox",
-        tooltip = "How many of the most recent items the section shows.",
+        tooltip = "How many of the most recent items the section shows -- one line each.",
         numeric = true, min = 1, max = 10, step = 1,
         get = function() return cfg.lootRollsMax end,
         set = function(v) cfg.lootRollsMax = v end,
@@ -1689,6 +1816,58 @@ function M:BuildSettings(page)
         set = function(v) cfg.lootRollsHideAfter = v end,
         onChange = RefreshLootRolls,
     })
+
+    page:Section({
+        title = "Path reminder",
+        tooltip = "Warns on screen while your character has no Path applied.",
+        get = function() return cfg.pathReminder end,
+        set = function(v) cfg.pathReminder = v end,
+        onChange = UpdatePathReminder,
+    })
+    page:Text("Shows a warning above your character whenever no Path is applied -- Path of Strength, "
+        .. "Agility, Intelligence, Healing or Duality. It reads the same value the character sheet's "
+        .. "Path line does, and disappears the moment one is set.")
+
+    -- Reading the live value back is the quickest way to see the detection is
+    -- working, so the page reports what it currently finds.
+    local function PathStatus()
+        local hasPath, name, supported = ActivePath()
+        if not supported then
+            return "|cffaaaaaaThis client doesn't report Paths, so the warning stays off.|r"
+        end
+        if not hasPath then return "Right now: |cffff4444no Path applied|r" end
+        return "Right now: |cff1eff00" .. (name or "a Path is applied") .. "|r"
+    end
+    local status = page:Hint(PathStatus())
+    page:OnRefresh(function() status:SetText(PathStatus()) end)
+
+    page:Input({
+        label = "Warning text", width = 260,
+        name = "HKSuitePathReminderTextBox",
+        fallback = ns.defaults.uifeatures.pathReminderText,
+        get = function() return cfg.pathReminderText end,
+        set = function(v) cfg.pathReminderText = v end,
+        onChange = UpdatePathReminder,
+    })
+
+    page:Input({
+        label = "Height above the middle of the screen (pixels)", width = 80,
+        name = "HKSuitePathReminderYBox",
+        tooltip = "Raise this if the warning overlaps your character.",
+        numeric = true, min = -400, max = 400, step = 5,
+        get = function() return cfg.pathReminderY end,
+        set = function(v) cfg.pathReminderY = v end,
+        onChange = UpdatePathReminder,
+    })
+
+    page:Input({
+        label = "Font size", width = 80,
+        name = "HKSuitePathReminderSizeBox",
+        numeric = true, min = 8, max = 48, step = 1,
+        get = function() return cfg.pathReminderSize end,
+        set = function(v) cfg.pathReminderSize = v end,
+        onChange = UpdatePathReminder,
+    })
 end
 
 function M:OnInit()
@@ -1697,6 +1876,7 @@ function M:OnInit()
     BuildCross()
     BuildTrinketBox()
     BuildStatBox()
+    BuildPathReminder()
     CompileLootPatterns()
     BuildLootRollsFrame()
 
@@ -1712,7 +1892,7 @@ function M:OnInit()
             StartRoll(arg1, arg2)
         elseif event == "CANCEL_LOOT_ROLL" then
             local rec = rollByID[arg1]
-            if rec then Finish(rec); RefreshLootRolls() end
+            if rec then Finish(rec); MarkLootRolls() end
         else
             HandleLootMessage(arg1)
         end
@@ -1743,5 +1923,6 @@ function M:OnInit()
 
     UpdateTrinkets()
     UpdateStats()
+    UpdatePathReminder()
     RefreshLootRolls()
 end
