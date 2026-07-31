@@ -45,7 +45,7 @@ ns.defaults.lootroll = {
     rollOnBoP            = false,  -- when off, BoP items are left for manual rolling
     greedIfNotDisenchant = true,   -- greed when a "disenchant" item can't be DE'd
     greedIfCantNeed      = true,   -- greed when a "need" item can't be needed
-    skipBoPConfirm       = true,   -- auto-confirm the BoP roll confirmation dialog
+    skipBoPConfirm       = true,   -- auto-confirm the BoP roll dialog, ours and manual rolls alike
 
     -- Base action by quality (Uncommon..Vanity).
     quality = {
@@ -64,7 +64,7 @@ ns.defaults.lootroll = {
 }
 
 local cfg
-local autoRolled = {}    -- rollIDs we initiated, so we only auto-confirm our own
+local autoRolled = {}    -- rollIDs we initiated, so we only take their bars down
 
 -- ------------------------------------------------------------ name matching
 local function NameMatches(name, needle)
@@ -100,24 +100,41 @@ local function ResolveAction(name, quality)
     return cfg.quality[quality]
 end
 
+-- An item you tell the roller to Need or Greed is an item you want, so the auto
+-- seller must not vendor it -- rolling for Bijous and then selling them is the
+-- case that prompted this. Pass and Disenchant are left out: neither ends with the
+-- item in your bags on purpose.
+--
+-- Exported rather than duplicated because the match strings live here.
+-- Modules/Automation.lua loads before this file, so it looks the function up when
+-- it builds a sell plan rather than holding a reference. The answer comes from the
+-- configured overrides whether or not the roller module is switched on: the
+-- setting is a statement about the item, not about the automation.
+local KEEP_ACTIONS = { need = true, greed = true }
+
+-- Returns the label of the override keeping this item, or nil if none does.
+function ns.LootRollKeeps(itemName)
+    if not itemName then return end
+    local conf = cfg or ns.GetConfig("lootroll")
+    if not (conf and conf.items) then return end
+    local lower = itemName:lower()
+    for _, e in ipairs(SPECIFIC_ITEMS) do
+        if KEEP_ACTIONS[conf.items[e.key] or ""] and lower:find(e.match, 1, true) then
+            return e.label
+        end
+    end
+end
+
 local After = ns.After
 
 -- Hide/release the group-loot window for a rollID. The default UI hides it in
 -- the roll buttons' OnClick; since we call RollOnLoot directly we must do it.
 -- ElvUI replaces the frames with its own bars (Misc.RollBars) that it only
 -- releases on CANCEL_LOOT_ROLL, so we release its bar via its module API too.
---
--- A rollID is not unique to the bar: a replacement bar also stamps it on the
--- widgets inside, and ElvUI puts it on the bar's item icon (which is what owns
--- the item tooltip). So "hide everything carrying this id" is too blunt -- it
--- hid the icon as well, ElvUI's release only clears the id on the bar itself,
--- and recycling a bar never shows the icon again. Every auto-rolled item cost
--- one pooled bar its icon until the next reload. The sweep is now a last resort
--- for bars we don't know about, and it only takes the outermost match.
-local function HideRollFrameNow(rollID)
-    local handled = false
 
-    -- Default Blizzard group-loot frames.
+-- Default Blizzard group-loot frames.
+local function HideBlizzardRollFrame(rollID)
+    local handled = false
     for i = 1, (NUM_GROUP_LOOT_FRAMES or 4) do
         local f = _G["GroupLootFrame" .. i]
         if f and f.rollID == rollID then
@@ -125,48 +142,76 @@ local function HideRollFrameNow(rollID)
             handled = true
         end
     end
+    return handled
+end
 
-    -- ElvUI: release its loot bar for this rollID (frees it for reuse + hides).
+-- ElvUI: release its loot bar for this rollID (frees it for reuse + hides).
+local function ReleaseElvUIRollBar(rollID)
     local Misc = ElvUI and ElvUI[1] and ElvUI[1]:GetModule("Misc", true)
-    if Misc and Misc.RollBars then
-        for _, frame in ipairs(Misc.RollBars) do
-            if frame.rollID == rollID then
-                if Misc.ReleaseFrame then pcall(Misc.ReleaseFrame, Misc, frame)
-                else pcall(frame.Hide, frame) end
-                handled = true
-                break
+    if not (Misc and Misc.RollBars) then return false end
+    for _, frame in ipairs(Misc.RollBars) do
+        if frame.rollID == rollID then
+            if Misc.ReleaseFrame then pcall(Misc.ReleaseFrame, Misc, frame)
+            else pcall(frame.Hide, frame) end
+            -- ElvUI stamps the rollID on the bar's icon button too (it owns the
+            -- item tooltip) but ReleaseFrame only clears the bar's copy. Left
+            -- behind, that stale id makes a dead bar match a later recycled
+            -- rollID. Clear it, and make sure the icon is shown: ElvUI's
+            -- START_LOOT_ROLL sets the icon's texture but never re-Shows it, so
+            -- an icon hidden once stays hidden for the life of the bar.
+            local icon = frame.itemButton
+            if icon then
+                icon.rollID = nil
+                if icon.Show then pcall(icon.Show, icon) end
             end
+            return true
         end
     end
+    return false
+end
 
-    if handled or not EnumerateFrames then return end
-
-    -- Unknown replacement bar. EnumerateFrames walks in creation order, so a
-    -- parent always comes before its children -- which lets us hide a bar and
-    -- then skip everything inside it.
-    local hidden = {}
+-- Last resort for a replacement bar we don't know about.
+--
+-- A rollID is not unique to the bar: bars stamp it on the widgets inside as
+-- well, so "hide everything carrying this id" is too blunt -- it takes the item
+-- icon with it, and a pooled bar that gets recycled never shows that icon
+-- again. Two rules keep this to the bar itself:
+--   * IsVisible, not IsShown -- a child of an already-hidden bar still reports
+--     IsShown() true, which is how released bars' icons were being hidden.
+--   * skip any frame with an ancestor carrying the same rollID, so only the
+--     outermost match is taken.
+local function SweepRollFrames(rollID)
+    if not EnumerateFrames then return end
     local f = EnumerateFrames()
     while f do
-        if f.rollID == rollID and f.IsShown and f:IsShown() then
+        if f.rollID == rollID and f.IsVisible and f:IsVisible() then
             local inside, parent = false, f.GetParent and f:GetParent()
             while parent do
-                if hidden[parent] then inside = true break end
+                if parent.rollID == rollID then inside = true break end
                 parent = parent.GetParent and parent:GetParent()
             end
-            if not inside then
-                hidden[f] = true
-                pcall(f.Hide, f)
-            end
+            if not inside then pcall(f.Hide, f) end
         end
         f = EnumerateFrames(f)
     end
 end
 
--- Run immediately (frames already built) and again shortly after, since a
--- replacement bar (ElvUI) may be created after our roll fires this same event.
+local function HideRollFrameNow(rollID)
+    local blizz = HideBlizzardRollFrame(rollID)
+    local elv = ReleaseElvUIRollBar(rollID)
+    return blizz or elv
+end
+
+-- Our START_LOOT_ROLL handler can run either side of the one that builds the
+-- bar, so if there's nothing to take down yet, look again shortly after. Only
+-- fall through to the sweep once a retry has also come up empty -- a successful
+-- release clears the rollID, and treating that as "not handled" is what sent
+-- the sweep after the released bar's leftover widgets.
 local function CloseRollFrame(rollID)
-    HideRollFrameNow(rollID)
-    After(0.1, function() HideRollFrameNow(rollID) end)
+    if HideRollFrameNow(rollID) then return end
+    After(0.1, function()
+        if not HideRollFrameNow(rollID) then SweepRollFrames(rollID) end
+    end)
 end
 
 -- Decide and cast the roll for a given rollID.
@@ -254,7 +299,8 @@ function M:BuildSettings(page)
     Check("Auto greed when an item cannot be need rolled",
         "If a 'Need' choice can't be needed, greed it instead.", "greedIfCantNeed")
     Check("Skip bind-on-pickup roll confirmation",
-        "Automatically confirm the BoP prompt for rolls this addon casts.", "skipBoPConfirm")
+        "Automatically confirms the 'this item will bind to you' prompt -- both for rolls this "
+        .. "addon casts and for Need / Greed / Disenchant you click yourself.", "skipBoPConfirm")
 
     page:Header("Items by quality")
     page:Grid(3, {
@@ -303,22 +349,36 @@ function M:BuildSettings(page)
     end
 end
 
+-- Both confirmation events raise a static popup; a disenchant roll gets its own
+-- dialog name. ElvUI runs its own popup system alongside Blizzard's, so ask both
+-- to close. Hiding a dialog name that doesn't exist here is a no-op.
+local CONFIRM_DIALOGS = { "CONFIRM_LOOT_ROLL", "CONFIRM_DISENCHANT_ROLL" }
+local function HideConfirmPopups()
+    local E = ElvUI and ElvUI[1]
+    for _, dialog in ipairs(CONFIRM_DIALOGS) do
+        StaticPopup_Hide(dialog)
+        if E and E.StaticPopup_Hide then pcall(E.StaticPopup_Hide, E, dialog) end
+    end
+end
+
 function M:OnInit()
     cfg = ns.GetConfig("lootroll")
 
     local f = CreateFrame("Frame")
     f:RegisterEvent("START_LOOT_ROLL")
     f:RegisterEvent("CONFIRM_LOOT_ROLL")
+    f:RegisterEvent("CONFIRM_DISENCHANT_ROLL")
     f:SetScript("OnEvent", function(_, event, id, rollType)
         if event == "START_LOOT_ROLL" then
             DoRoll(id)
-        elseif event == "CONFIRM_LOOT_ROLL" then
-            if autoRolled[id] and cfg.skipBoPConfirm then   -- only confirm our own rolls
-                ConfirmLootRoll(id, rollType)
-                StaticPopup_Hide("CONFIRM_LOOT_ROLL")
-                if ElvUI and ElvUI[1] and ElvUI[1].StaticPopup_Hide then
-                    pcall(ElvUI[1].StaticPopup_Hide, ElvUI[1], "CONFIRM_LOOT_ROLL")
-                end
+        elseif cfg.skipBoPConfirm then
+            -- Confirm whoever cast the roll: an item we skipped still needs the
+            -- prompt cleared when the player clicks Need / Greed themselves.
+            ConfirmLootRoll(id, rollType)
+            HideConfirmPopups()
+            -- Only our own rolls get their bar taken down. After a manual roll
+            -- the bar stays up until the roll ends, same as any other item.
+            if autoRolled[id] then
                 autoRolled[id] = nil
                 CloseRollFrame(id)
             end
