@@ -115,6 +115,31 @@ local function GossipActiveQuests()
     return out
 end
 
+-- Was this quest offer handed to us by someone in our group rather than an NPC?
+-- A shared quest comes through the same QUEST_DETAIL frame as an NPC's, but the
+-- quest giver unit is the player who shared it.
+local function OfferIsFromGroupMember()
+    local inRaid = GetNumRaidMembers() > 0
+    if not inRaid and GetNumPartyMembers() == 0 then return false end
+    if UnitIsPlayer("questnpc") or UnitIsPlayer("npc") then return true end
+    -- Some builds leave the unit token unset for a shared quest, so also match
+    -- the giver's name against the roster...
+    local name = UnitName("questnpc") or UnitName("npc")
+    if name then
+        local prefix, count = "party", GetNumPartyMembers()
+        if inRaid then prefix, count = "raid", GetNumRaidMembers() end
+        for i = 1, count do
+            if UnitName(prefix .. i) == name then return true end
+        end
+        return false
+    end
+    -- ...and treat a giver-less offer as shared, once the two other ways to get
+    -- one without an NPC (a quest item, an area trigger) are ruled out.
+    if QuestGetAutoAccept and QuestGetAutoAccept() then return false end
+    if QuestIsFromAreaTrigger and QuestIsFromAreaTrigger() then return false end
+    return true
+end
+
 local handlers = {}
 
 -- Guard against accepting the same quest twice in quick succession. Some NPCs
@@ -122,11 +147,35 @@ local handlers = {}
 -- triggers a redundant AcceptQuest() and a "You are already on that quest" error.
 local lastQuestTitle, lastQuestTime = nil, 0
 
+-- Title of the most recent quest a group member offered us. Pushing such a quest
+-- back out bounces it around the group and spams the sharer with errors, so
+-- QUEST_ACCEPTED checks this before sharing. Kept by title (not a bare flag) so a
+-- slow manual accept can't let it bleed onto an unrelated quest.
+local groupOfferedTitle, groupOfferedTime = nil, 0
+local GROUP_OFFER_WINDOW = 300   -- seconds a remembered offer stays relevant
+
+local function NoteGroupOffer(title)
+    groupOfferedTitle, groupOfferedTime = title, GetTime()
+end
+
+local function WasOfferedByGroup(title)
+    if not title or title ~= groupOfferedTitle then return false end
+    return (GetTime() - groupOfferedTime) < GROUP_OFFER_WINDOW
+end
+
 function handlers.QUEST_DETAIL()
+    local title = GetTitleText()
+    -- Record this before the accept, while the quest giver is still around to
+    -- inspect. Runs regardless of autoAccept: manual accepts share too.
+    if OfferIsFromGroupMember() then
+        NoteGroupOffer(title)
+    elseif title == groupOfferedTitle then
+        groupOfferedTitle = nil   -- an NPC is offering it now; the old note is stale
+    end
+
     if not cfg.autoAccept or BypassHeld() then return end
     if cfg.skipDailies and QuestIsDaily and QuestIsDaily() then return end
     if IsCallboard() and not cfg.autoAcceptCallboard then return end
-    local title = GetTitleText()
     local now = GetTime()
     if title and title == lastQuestTitle and (now - lastQuestTime) < 1.5 then
         return  -- already accepted this one moments ago; skip the duplicate
@@ -135,7 +184,11 @@ function handlers.QUEST_DETAIL()
     AcceptQuest()
 end
 
-function handlers.QUEST_ACCEPT_CONFIRM()
+-- arg1/arg2 are the player who started the quest and its title. This is the
+-- escort-style prompt raised when a group member begins a quest, so the group
+-- already has it in front of them — same no-reshare rule as a shared quest.
+function handlers.QUEST_ACCEPT_CONFIRM(name, questTitle)
+    if questTitle then NoteGroupOffer(questTitle) end
     if cfg.autoAccept and not BypassHeld() then
         ConfirmAcceptQuest()
     end
@@ -151,6 +204,11 @@ function handlers.QUEST_ACCEPTED(questIndex)
     if not inRaid and GetNumPartyMembers() == 0 then return end
     if inRaid and cfg.shareOnlyInParty then return end
     SelectQuestLogEntry(questIndex)
+    local title = GetQuestLogTitle(questIndex)
+    if WasOfferedByGroup(title) then
+        groupOfferedTitle = nil
+        return   -- the group handed us this one; don't hand it straight back
+    end
     -- GetQuestLogPushable() reflects the selected quest; skip un-shareable ones
     -- so we don't spew "that quest can't be shared" errors.
     if GetQuestLogPushable and not GetQuestLogPushable() then return end
