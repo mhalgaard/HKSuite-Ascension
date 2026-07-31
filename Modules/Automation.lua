@@ -33,6 +33,7 @@ ns.defaults.automation = {
         [4] = false,           -- Epic
     },
     -- Protections: things the quality rules above are not allowed to sell.
+    protectRolledFor  = true,  -- items the Loot Auto Roller is set to Need/Greed
     protectRealmBound = true,  -- anything the tooltip marks as realm bound
     protectWorldforged = true, -- anything the tooltip marks as worldforged
     protectTradeGoods = true,  -- crafting materials (ore, herbs, cloth, leather, mats)
@@ -130,6 +131,12 @@ local PROTECTIONS = {
         key    = "list",
         label  = "listed item",
         listed = true,
+    },
+    {
+        key    = "rolled",
+        option = "protectRolledFor",
+        label  = "item you roll Need/Greed on",
+        rolled = true,
     },
     {
         key     = "realmbound",
@@ -280,6 +287,8 @@ local function ProtectedBy(item)
         if group.option == nil or cfg[group.option] then
             if group.listed then
                 if item.listed then return group end
+            elseif group.rolled then
+                if item.rolledFor then return group end
             elseif group.phrases then
                 if item.bag and TooltipHasPhrase(item.bag, item.slot, group.phrases) then
                     return group
@@ -487,6 +496,9 @@ local function BuildSellPlan()
                     bag = bag, slot = slot, itemType = itemType, subType = itemSubType,
                     reqLevel = reqLevel,
                     listed = (id and listIds[id]) or (name and listNames[name:lower()]),
+                    -- The Loot Auto Roller's per-item overrides, looked up live:
+                    -- that module loads after this one.
+                    rolledFor = type(ns.LootRollKeeps) == "function" and ns.LootRollKeeps(name),
                 })
                 if byQuality and protection then
                     kept[protection.label] = (kept[protection.label] or 0) + 1
@@ -506,6 +518,11 @@ local function BuildSellPlan()
 end
 
 local function SellEntry(entry)
+    -- UseContainerItem only means "sell" while the merchant window is the one
+    -- open. With a bank up instead it deposits the item, so never touch the bag
+    -- without the vendor in front of us -- this is the last line of defence for
+    -- every caller, not just the one that can arrive late.
+    if not AtVendor() then return end
     -- The plan was built before any of this ran; make sure the slot still holds
     -- the item we decided on.
     if GetContainerItemLink(entry.bag, entry.slot) ~= entry.link then return end
@@ -522,6 +539,14 @@ local ProcessNext   -- forward declaration (the collect watcher calls back into 
 local function WatchCollect(wait)
     if not run or run.waiting ~= wait then return end
 
+    -- Before anything else: the merchant can close while a collect is in flight,
+    -- and a collect that lands after that used to sell anyway. End the visit
+    -- instead and leave the item where it is.
+    if not AtVendor() then
+        run.waiting = nil
+        return FinishRun()
+    end
+
     AcceptAppearancePopup()
 
     if wait.collected or IsCollected(wait.appearance) then
@@ -529,11 +554,6 @@ local function WatchCollect(wait)
         run.collected = run.collected + 1
         SellEntry(wait.entry)
         return ProcessNext()
-    end
-
-    if not AtVendor() then
-        run.waiting = nil
-        return FinishRun()
     end
 
     if GetTime() - wait.started < COLLECT_TIMEOUT then
@@ -669,6 +689,15 @@ function M:BuildSettings(page)
         .. "An item whose appearance cannot be collected is left in your bags rather than sold.",
         function() return cfg.collectAppearances end,
         function(v) cfg.collectAppearances = v end)
+
+    Check("Never sell items you roll Need or Greed on",
+        "Skips anything the Loot Auto Roller's specific-item overrides are set to Need or Greed -- "
+        .. "Bijous, Coins, Primal Hakkari Idols, Molten Core cores, and the rest of that list.\n\n"
+        .. "Rolling for something and then vendoring it is never what you meant. Overrides set to "
+        .. "Pass or Disenchant are not covered, and neither are the by-quality rules.\n\n"
+        .. "Reads the Loot Auto Roller's settings whether or not that module is switched on.",
+        function() return cfg.protectRolledFor end,
+        function(v) cfg.protectRolledFor = v end)
 
     Check("Never sell realm bound items",
         "Skips anything whose tooltip says Realm Bound, even when its quality is ticked above.",
