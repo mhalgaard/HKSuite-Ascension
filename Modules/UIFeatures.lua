@@ -52,8 +52,10 @@ ns.defaults.uifeatures = {
     lootRollsPos        = { "TOPRIGHT", "TOPRIGHT", -220, -260 },
 
     -- Path reminder: warn while the character has no Path (primary stat) applied.
+    -- "Not applied" is the case that matters and it is not the same as "not
+    -- selected" -- see the note above ActivePath().
     pathReminder     = false,
-    pathReminderText = "No Path selected!",
+    pathReminderText = "--------- MISSING PATH ---------",
     pathReminderY    = 100,      -- pixels above screen centre, i.e. above your character
     pathReminderSize = 18,
 }
@@ -1463,7 +1465,7 @@ local function BuildLootRollsFrame()
     -- Nothing here can matter until a roll has actually been recorded, so the
     -- common case -- feature off, or simply not in a group -- costs one table
     -- length check.
-    lootFrame.ticker = CreateFrame("Frame")
+    lootFrame.ticker = CreateFrame("Frame", "HKSuiteLootRollsTicker")
     lootFrame.ticker:SetScript("OnUpdate", function(self, e)
         self.elapsed = (self.elapsed or 0) + e
         if self.elapsed < 0.25 then return end
@@ -1503,39 +1505,83 @@ end
 -- easy and costs you the scaling, so this puts a warning over your character
 -- until a Path is applied.
 --
--- The character sheet's own Path line is the source for how to read it -- see
--- ElvUI_Enhanced's Modules/Blizzard/CharacterFrame.lua PrimaryStat(), which does
---     local statID = C_PrimaryStat:GetActivePrimaryStat()
---     local _, _, _, name = C_PrimaryStat:GetPrimaryStatInfo(statID)
--- and prints "No Primary Stat" when statID comes back empty. Both are methods on
--- the C_PrimaryStat table, so they take the table as self.
+-- THERE ARE TWO PATH STATES AND THEY CAN DISAGREE. Rolling talents leaves the
+-- character with a Path selected but NOT applied: the scaling is silently gone
+-- until it is re-applied, which visibly changes ability damage and stats. So the
+-- thing worth warning about is the applied state, not the selected one.
 --
--- A client without C_PrimaryStat has no Paths to be missing, so an absent API
--- means "can't tell" and the reminder stays quiet rather than warning forever.
+--   C_PrimaryStat:GetActivePrimaryStat()  -> the Path you SELECTED
+--   GetUnitPrimaryStat("player")          -> the Path actually APPLIED, nil if none
+--
+-- Verified in game 2026-08-01 by sampling both in each state. Desynced they read
+-- 1 and nil; after re-applying, 1 and 1. Nothing else moved between the two
+-- samples -- the Path's spell (GetPrimaryStatInfo return 1) stays known either
+-- way, and no marker aura appears -- so the unit read is the only usable signal.
+--
+-- An earlier version read only GetActivePrimaryStat, which is why it stayed quiet
+-- on exactly the characters it was built for.
 local PATH_NAME_RETURN = 4   -- GetPrimaryStatInfo -> spellID, ?, icon, name, tooltip
 
--- Returns: hasPath, pathName, supported
-local function ActivePath()
-    local api = _G.C_PrimaryStat
-    if type(api) ~= "table" or type(api.GetActivePrimaryStat) ~= "function" then
-        return false, nil, false
-    end
-    local ok, id = pcall(api.GetActivePrimaryStat, api)
-    if not ok then return false, nil, false end
-    -- Empty means no Path. Nil is what the character sheet checks for; 0 is
-    -- covered too, in case the server ever answers that way instead.
-    if not id or id == 0 then return false, nil, true end
+-- Path ids, for reference: 1 Strength, 2 Agility, 3 Intelligence, 4 Healing,
+-- 6 Duality. Enum.PrimaryStat also carries 5 (Stamina), which is not selectable.
+-- The applied test deliberately does NOT whitelist these -- nil is the verified
+-- "not applied" signal, so any other value counts as applied and a Path id this
+-- build adds later still works.
 
-    local name
-    if type(api.GetPrimaryStatInfo) == "function" then
-        local res = { pcall(api.GetPrimaryStatInfo, api, id) }
-        if res[1] then name = res[1 + PATH_NAME_RETURN] end
+-- Only the classless Hero class has Paths. GetUnitPrimaryStat returns nil for
+-- every non-Hero unit regardless, so without this the reminder would nag forever
+-- on a realm that has no Paths at all.
+local function IsHeroCharacter()
+    if type(_G.C_Player) == "table" and type(C_Player.IsHero) == "function" then
+        local ok, res = pcall(C_Player.IsHero, C_Player)
+        if ok then return res and true or false end
     end
-    -- A Path whose name won't resolve is still a Path, so don't warn about it.
-    return true, name, true
+    local _, classToken = UnitClass("player")
+    return classToken == "HERO"
+end
+
+local function PathName(id)
+    local api = _G.C_PrimaryStat
+    if not (id and type(api) == "table" and type(api.GetPrimaryStatInfo) == "function") then
+        return nil
+    end
+    local res = { pcall(api.GetPrimaryStatInfo, api, id) }
+    if res[1] then return res[1 + PATH_NAME_RETURN] end
+end
+
+local function SelectedPath()
+    local api = _G.C_PrimaryStat
+    if type(api) ~= "table" or type(api.GetActivePrimaryStat) ~= "function" then return nil end
+    local ok, id = pcall(api.GetActivePrimaryStat, api)
+    if ok then return id end
+end
+
+-- Returns: applied, pathName, supported, appliedId, selectedId
+local function ActivePath()
+    if type(_G.GetUnitPrimaryStat) ~= "function" then return false, nil, false end
+    if not IsHeroCharacter() then return false, nil, false end
+
+    local ok, appliedId = pcall(_G.GetUnitPrimaryStat, "player")
+    if not ok then return false, nil, false end
+
+    local selectedId = SelectedPath()
+    if appliedId and appliedId ~= 0 then
+        return true, PathName(appliedId), true, appliedId, selectedId
+    end
+    -- Not applied. Name the Path they picked, so the warning can say which one is
+    -- missing rather than just that something is.
+    return false, PathName(selectedId), true, appliedId, selectedId
 end
 
 local pathFrame
+
+-- Unit data populates asynchronously, so GetUnitPrimaryStat can briefly answer nil
+-- straight after a loading screen on a character whose Path is perfectly fine.
+-- Warning on the first miss would flash the reminder on every zone. Confirm it
+-- across a few polls instead; clearing is immediate, since a Path that reads as
+-- applied is never a false positive.
+local MISSES_BEFORE_WARNING = 3
+local pathMisses = 0
 
 local function UpdatePathReminder()
     if not pathFrame then return end
@@ -1543,11 +1589,15 @@ local function UpdatePathReminder()
         pathFrame:Hide()
         return
     end
-    local hasPath, _, supported = ActivePath()
-    if hasPath or not supported then
+    local applied, _, supported = ActivePath()
+    if applied or not supported then
+        pathMisses = 0
         pathFrame:Hide()
         return
     end
+
+    pathMisses = pathMisses + 1
+    if pathMisses < MISSES_BEFORE_WARNING then return end
 
     local file = GameFontNormal:GetFont()
     local size = tonumber(cfg.pathReminderSize) or 18
@@ -1824,19 +1874,33 @@ function M:BuildSettings(page)
         set = function(v) cfg.pathReminder = v end,
         onChange = UpdatePathReminder,
     })
-    page:Text("Shows a warning above your character whenever no Path is applied -- Path of Strength, "
-        .. "Agility, Intelligence, Healing or Duality. It reads the same value the character sheet's "
-        .. "Path line does, and disappears the moment one is set.")
+    page:Text("Shows a warning above your character whenever no Path is |cffffd000applied|r -- Path of "
+        .. "Strength, Agility, Intelligence, Healing or Duality -- and disappears the moment one is.")
+    page:Text("Selecting a Path and having one applied are |cffffd000not the same thing|r. Rolling "
+        .. "talents can leave a Path selected while nothing is applied, which silently costs you the "
+        .. "scaling until you re-apply it -- your abilities hit harder the moment you do. That is the "
+        .. "case this watches for, and it is invisible everywhere except the character sheet.")
 
     -- Reading the live value back is the quickest way to see the detection is
     -- working, so the page reports what it currently finds.
+    -- The raw id and name ride along because "no Path" is not reported as nil on
+    -- this client -- it is an id with an explanatory name -- so the raw values are
+    -- the only way to see at a glance whether the detection is reading them right.
     local function PathStatus()
-        local hasPath, name, supported = ActivePath()
+        local applied, name, supported, appliedId, selectedId = ActivePath()
         if not supported then
-            return "|cffaaaaaaThis client doesn't report Paths, so the warning stays off.|r"
+            return "|cffaaaaaaThis character has no Paths, so the warning stays off.|r"
         end
-        if not hasPath then return "Right now: |cffff4444no Path applied|r" end
-        return "Right now: |cff1eff00" .. (name or "a Path is applied") .. "|r"
+        local raw = " |cff808080[applied " .. tostring(appliedId)
+            .. ", selected " .. tostring(selectedId) .. "]|r"
+        if applied then
+            return "Right now: |cff1eff00" .. (name or "a Path is applied") .. "|r" .. raw
+        end
+        if selectedId and selectedId ~= 0 then
+            return "Right now: |cffff4444" .. (name or "your Path")
+                .. " is selected but NOT applied|r -- re-apply it to get the scaling back" .. raw
+        end
+        return "Right now: |cffff4444no Path applied|r" .. raw
     end
     local status = page:Hint(PathStatus())
     page:OnRefresh(function() status:SetText(PathStatus()) end)
@@ -1882,7 +1946,7 @@ function M:OnInit()
 
     -- Loot rolls: START_LOOT_ROLL gives us the item, the chat traffic gives us
     -- the answers, CANCEL_LOOT_ROLL tells us the roll is over.
-    local loot = CreateFrame("Frame")
+    local loot = CreateFrame("Frame", "HKSuiteUIFeaturesLootEvents")
     loot:RegisterEvent("START_LOOT_ROLL")
     loot:RegisterEvent("CANCEL_LOOT_ROLL")
     loot:RegisterEvent("CHAT_MSG_LOOT")

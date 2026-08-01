@@ -191,7 +191,19 @@ local function ShowChatFrame(frame)
     if not frame then return end
     local docked = frame.isDocked
         or (DOCKED_CHAT_FRAMES and tContains(DOCKED_CHAT_FRAMES, frame))
-    if not docked and FCF_DockFrame and DOCKED_CHAT_FRAMES then
+
+    -- Already docked means there is nothing to repair: the dock owns the tab's
+    -- visibility and which one is selected. Falling through anyway is what made
+    -- every loading screen dump you back on General -- this runs from
+    -- PLAYER_ENTERING_WORLD, and the tail of it re-selected a tab each time.
+    if docked then return end
+
+    -- Whichever tab you were reading is yours to keep. Docking a frame changes the
+    -- selection, so remember what was selected and put it back afterwards rather
+    -- than hard-coding General.
+    local previous = _G.SELECTED_DOCK_FRAME
+
+    if FCF_DockFrame and DOCKED_CHAT_FRAMES then
         pcall(function() frame:SetUserPlaced(false) end)  -- drop any stale floating position
         pcall(FCF_DockFrame, frame, (#DOCKED_CHAT_FRAMES + 1), nil)
     end
@@ -200,8 +212,10 @@ local function ShowChatFrame(frame)
     local tab = _G[frame:GetName() .. "Tab"]
     if tab then tab:Show() end
     if FCF_DockUpdate then pcall(FCF_DockUpdate) end
-    -- Keep General selected so the re-docked frame sits as a tab, not covering it.
-    if ChatFrame1 and FCF_SelectDockFrame then pcall(FCF_SelectDockFrame, ChatFrame1) end
+    -- Restore the selection so the re-docked frame sits as a tab rather than
+    -- covering what you had open.
+    local restore = previous or ChatFrame1
+    if restore and FCF_SelectDockFrame then pcall(FCF_SelectDockFrame, restore) end
     KickElvUIChat()
 end
 

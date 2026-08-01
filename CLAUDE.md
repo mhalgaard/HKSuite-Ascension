@@ -117,6 +117,26 @@ Default expectation when telling the user how to test:
 - Edited an existing file (incl. Scratch.lua) → `/reload`.
 - Added a new file to the toc / new addon → restart (or relog, then restart).
 
+## Rule: debug output goes to the Guild chat window
+Any diagnostic, profiler or temporary debug print must write to the **"Guild"**
+chat window, never to `DEFAULT_CHAT_FRAME`. Diagnostics print in volume, and in
+the main window that buries actual chat and combat text — the Guild tab is the
+scratch surface.
+
+Use `ns.DebugPrint(msg)` for a prefixed line, or `ns.DebugFrame()` to get the
+frame directly when dumping multi-line output that shouldn't repeat the prefix.
+Both fall back to the default frame when no Guild window exists, so they are
+always safe to call.
+
+```lua
+ns.DebugPrint("armed, silent")
+local out = ns.DebugFrame()
+out:AddMessage(string.format("  %7.1f ms  %s", ms, label))
+```
+
+`ns.Print` is the *user-facing* one and deliberately writes to both windows —
+don't use it for debugging.
+
 ## Rule: releases start as alpha, promote when confirmed
 Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which publishes the
 release as a **pre-release** (alpha) titled `HKSuite vX.Y.Z (alpha)`. It stays

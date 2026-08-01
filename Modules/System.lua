@@ -230,7 +230,7 @@ function M:OnInit()
     InstallErrorFilter()
 
     -- Instant loot + bind-on-pickup confirmation.
-    local lootFrame = CreateFrame("Frame")
+    local lootFrame = CreateFrame("Frame", "HKSuiteSystemLootEvents")
     lootFrame:RegisterEvent("LOOT_OPENED")
     lootFrame:RegisterEvent("LOOT_BIND_CONFIRM")
     lootFrame:SetScript("OnEvent", function(_, event, arg1)

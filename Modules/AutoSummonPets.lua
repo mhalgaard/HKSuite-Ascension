@@ -21,6 +21,8 @@ ns.defaults.pets = {
     noResummon     = false,   -- only summon after a zone change
     lootTrans      = false,   -- skip Lootbot if Loot-Transfigurator is owned
     safeZonePet    = "",      -- preferred pet name in rest/AFK zones
+    keepWhileResting = true,  -- never swap out a pet that is already out while resting
+    restZones      = "",      -- extra zones to treat as resting (comma separated)
 }
 
 local cfg
@@ -76,6 +78,56 @@ local function currentZoneToken()
     return (GetZoneText() or "") .. "|" .. (GetSubZoneText() or "")
 end
 
+-- ------------------------------------------------------------- "am I safe here"
+-- Ascension does not flag its capitals as resting -- standing in Orgrimmar,
+-- IsResting() is false -- so the inn/city test can't be IsResting() alone. The
+-- capital names are matched directly, plus anything the realm marks as a sanctuary
+-- (Dalaran and Shattrath in stock WotLK), plus whatever you list yourself for the
+-- custom hubs a private server invents.
+local CITY_ZONES = {
+    ["orgrimmar"] = true, ["thunder bluff"] = true, ["undercity"] = true,
+    ["silvermoon city"] = true,
+    ["stormwind city"] = true, ["ironforge"] = true, ["darnassus"] = true,
+    ["the exodar"] = true,
+    ["shattrath city"] = true, ["dalaran"] = true,
+}
+
+-- Parsed form of cfg.restZones, rebuilt only when the setting's text changes.
+local restZonesRaw, restZonesList
+
+local function extraRestZones()
+    local raw = cfg.restZones or ""
+    if raw ~= restZonesRaw then
+        restZonesRaw, restZonesList = raw, {}
+        for piece in raw:gmatch("[^,]+") do
+            local name = piece:lower():gsub("^%s+", ""):gsub("%s+$", "")
+            if name ~= "" then restZonesList[#restZonesList + 1] = name end
+        end
+    end
+    return restZonesList
+end
+
+local function inSafeCity()
+    local zone = (GetZoneText() or ""):lower()
+    if CITY_ZONES[zone] then return true end
+
+    if GetZonePVPInfo and GetZonePVPInfo() == "sanctuary" then return true end
+
+    local extras = extraRestZones()
+    if #extras > 0 then
+        local sub = (GetSubZoneText() or ""):lower()
+        for _, name in ipairs(extras) do
+            if zone:find(name, 1, true) or sub:find(name, 1, true) then return true end
+        end
+    end
+    return false
+end
+
+-- Resting proper, or somewhere that ought to count as resting.
+local function inRestArea()
+    return IsResting() or inSafeCity()
+end
+
 -- Companion lookup (name substring match, like the WeakAura).
 --
 -- The names and their indices only move when the collection itself changes, but
@@ -120,10 +172,29 @@ local function anyPetActive()
     return false
 end
 
+-- Same answer, memoised. The ticker asks every two seconds and the scan walks the
+-- whole collection, which is the cost the companion cache above exists to avoid --
+-- so hold the answer until something actually changes a companion's state.
+-- COMPANION_UPDATE covers summoning, dismissing and anything done by hand.
+local petOutKnown, petOutValue = false, false
+
+local function invalidatePetOut() petOutKnown = false end
+
+local function isPetOut()
+    if not petOutKnown then
+        petOutValue = anyPetActive()
+        petOutKnown = true
+    end
+    return petOutValue
+end
+
 local function summonPet(idx)
     lastSummonTime = GetTime()
     lastSummonedZone = currentZoneToken()
-    afterDelay(0.2, function() CallCompanion("CRITTER", idx) end)
+    afterDelay(0.2, function()
+        CallCompanion("CRITTER", idx)
+        invalidatePetOut()
+    end)
 end
 
 local function canAttemptSummon()
@@ -228,8 +299,8 @@ local function contextPriorityList()
         end
     end
 
-    -- Safe zone (resting / AFK): custom pet then Book.
-    if IsResting() or UnitIsAFK("player") then
+    -- Safe zone (resting / city / AFK): custom pet then Book.
+    if inRestArea() or UnitIsAFK("player") then
         local list = {}
         if cfg.safeZonePet and cfg.safeZonePet ~= "" then table.insert(list, cfg.safeZonePet) end
         table.insert(list, "Book of Ascension")
@@ -264,6 +335,13 @@ end
 
 local function choosePet()
     if not ns.IsModuleEnabled("pets") then return end
+
+    -- Resting or in a city: whatever pet you have out is the one you chose to have
+    -- out, so the context's preference doesn't get to trade it in. This is
+    -- deliberately "don't change", not "don't summon" -- with nothing out there is
+    -- no choice to override, and the module would be useless at an inn otherwise.
+    if cfg.keepWhileResting and inRestArea() and isPetOut() then return end
+
     if not canAttemptSummon() then return end
 
     for _, petName in ipairs(buildPriorityList()) do
@@ -296,6 +374,16 @@ function M:BuildSettings(page)
         tooltip = "Allow summoning premium pets during combat.",
         get = function() return cfg.summonInCombat end,
         set = function(v) cfg.summonInCombat = v end,
+    })
+    page:Check({
+        label = "Never change my pet while resting or in a city",
+        tooltip = "In a rest area, a pet you already have out is left alone -- the module won't "
+            .. "swap it for the one it would normally pick.\n\nWith nothing out it still summons, "
+            .. "so you get a pet at an inn; it just never overrides a choice you made yourself."
+            .. "\n\nAscension doesn't flag its capitals as resting, so the capital city names count "
+            .. "as a rest area too, along with any sanctuary and anything you list below.",
+        get = function() return cfg.keepWhileResting end,
+        set = function(v) cfg.keepWhileResting = v end,
     })
     page:Check({
         label = "Only summon after a zone change",
@@ -348,6 +436,18 @@ function M:BuildSettings(page)
         set = function(v) cfg.safeZonePet = v end,
     })
 
+    page:Input({
+        label = "Extra rest zones",
+        name = "HKSuitePetRestZones", width = 300,
+        tooltip = "Comma-separated zone or sub-zone names to treat as a rest area, on top of "
+            .. "actual resting, the capital cities and any sanctuary.\n\n"
+            .. "For a custom hub this realm invents that none of those cover.\n\n"
+            .. "Matched as a substring, so part of the name is enough.",
+        get = function() return cfg.restZones or "" end,
+        set = function(v) cfg.restZones = v end,
+    })
+    page:Hint("Rest areas already cover: resting, the ten capital cities, and sanctuary zones.")
+
     -- Spell out the priority: which pet you get is otherwise hard to predict.
     page:Header("Summon priority by situation")
     page:Text("Highest available pet you own wins; PvP/arena summons nothing.")
@@ -357,13 +457,15 @@ function M:BuildSettings(page)
         "• Raid:  Fix-o-Tron (with the Loot-Transfigurator ticked)  >  Lootbot 3000\n" ..
         "• Open world:  Lootbot 3000  >  Book of Ascension  >  Treasure Keeper  >  Fix-o-Tron\n" ..
         "• While leveling (before your first LFG completion):  Book of Ascension leads\n" ..
-        "• Resting / AFK in a safe zone:  your safe-zone pet (above)  >  Book of Ascension"
+        "• Resting / in a city / AFK:  your safe-zone pet (above)  >  Book of Ascension"
     )
     page:Text("With the Loot-Transfigurator ticked above, a stand-in goes in ahead of every "
         .. "Lootbot 3000 in that list -- Fix-o-Tron in a raid, your safe-zone pet (or Fix-o-Tron) "
         .. "anywhere else. The Lootbot keeps its place behind the stand-in as a fallback, and "
         .. "nothing else about the order changes.")
     page:Hint("Wisdomball is only used in Normal dungeons, never Heroic/Mythic.")
+    page:Hint("In a rest area, none of this replaces a pet you already have out unless you untick "
+        .. "\"Never change my pet while resting or in a city\" above.")
 end
 
 function M:OnInit()
@@ -374,9 +476,13 @@ function M:OnInit()
     ev:RegisterEvent("LFG_COMPLETION_REWARD")
     ev:RegisterEvent("COMPANION_LEARNED")
     ev:RegisterEvent("COMPANION_UNLEARNED")
+    ev:RegisterEvent("COMPANION_UPDATE")
     ev:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_ENTERING_WORLD" then
+        if event == "COMPANION_UPDATE" then
+            invalidatePetOut()       -- something was summoned or dismissed
+        elseif event == "PLAYER_ENTERING_WORLD" then
             invalidateCompanions()   -- indices are not stable across a reload
+            invalidatePetOut()
             local _, itype = GetInstanceInfo()
             if IsInInstance() and itype == "party" then
                 dungeonEnterTime = GetTime()
@@ -388,6 +494,7 @@ function M:OnInit()
             lfgEverCompleted = true
         else
             invalidateCompanions()   -- collection changed, so the cache is stale
+            invalidatePetOut()
         end
     end)
 

@@ -27,6 +27,18 @@ function ns.Print(msg)
     end
 end
 
+-- Debugging output goes to the Guild window and nowhere else. Diagnostics print
+-- in volume -- a profiler dump is dozens of lines -- and in the main window that
+-- buries chat and combat text. Falls back to the default frame when there is no
+-- Guild window, so it is always safe to call.
+function ns.DebugFrame()
+    return GuildChatFrame() or DEFAULT_CHAT_FRAME
+end
+
+function ns.DebugPrint(msg)
+    ns.DebugFrame():AddMessage(PREFIX .. tostring(msg))
+end
+
 -- One-shot delayed call, shared because several modules need to get out from
 -- under whatever called them before acting. C_Timer when the client provides it;
 -- otherwise an OnUpdate ticker off a small pool, since frames are never garbage

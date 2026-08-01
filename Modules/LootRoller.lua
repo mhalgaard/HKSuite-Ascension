@@ -364,7 +364,7 @@ end
 function M:OnInit()
     cfg = ns.GetConfig("lootroll")
 
-    local f = CreateFrame("Frame")
+    local f = CreateFrame("Frame", "HKSuiteLootRollerEvents")
     f:RegisterEvent("START_LOOT_ROLL")
     f:RegisterEvent("CONFIRM_LOOT_ROLL")
     f:RegisterEvent("CONFIRM_DISENCHANT_ROLL")
