@@ -123,7 +123,7 @@ function ns.BuildOverviewPage(page)
     end
 
     page:Spacer(4)
-    page:Hint("HKSuite v" .. version .. "  --  /hk opens this window.")
+    page:Hint("HKSuite v" .. version .. " by " .. ns.author .. "  --  /hk opens this window.")
 end
 
 -- HKSuite's settings are its own window, but the addon should still be reachable
@@ -138,6 +138,10 @@ function ns.BuildOptionsStub()
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("HKSuite  |cff808080v" .. version .. "|r")
+
+    local byline = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    byline:SetPoint("LEFT", title, "RIGHT", 8, -1)
+    byline:SetText("|cff808080by " .. ns.author .. "|r")
 
     local blurb = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     blurb:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)

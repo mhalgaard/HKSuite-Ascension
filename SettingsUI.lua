@@ -1293,6 +1293,11 @@ local function BuildWindow()
     brand:SetText("HKSuite")
     Colorize(brand, C.accent)
 
+    local byline = bar:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    byline:SetPoint("LEFT", brand, "RIGHT", 6, -1)
+    byline:SetText("by " .. ns.author)
+    Colorize(byline, C.muted)
+
     local close = CreateFrame("Button", nil, bar)
     close:SetSize(TITLEBAR_H - 12, TITLEBAR_H - 12)
     close:SetPoint("RIGHT", -8, 0)

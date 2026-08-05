@@ -1,8 +1,8 @@
 ## Interface: 30300
 ## Title: HKSuite
-## Notes: A suite of quality-of-life utilities for Project Ascension
-## Author: mhalgaard
-## Version: 2.2.0
+## Notes: A suite of quality-of-life utilities for Project Ascension, by Nodding
+## Author: Nodding
+## Version: 2.3.0
 ## SavedVariables: HKSuiteDB
 ## SavedVariablesPerCharacter: HKSuiteCharDB
 
@@ -21,4 +21,5 @@ Modules\Vanity.lua
 Modules\ChatFilters.lua
 Modules\ClearQuests.lua
 Modules\UIFeatures.lua
+Modules\SynergyExport.lua
 Modules\Scratch.lua

@@ -1,5 +1,7 @@
 # HKSuite
 
+*HKSuite by Nodding*
+
 A suite of quality-of-life utilities for **Project Ascension** (WoW 3.3.5a client).
 Built to be modular — each utility is a self-contained module, so new tools drop
 straight in. All settings are **account-wide** (shared across every character).
@@ -40,6 +42,7 @@ apply after a reload.
 | Auto-Grab Vanity | On | Collect & tidy up vanity-collection items |
 | Loot Auto Roller | Off | Auto-roll on group loot, by item quality |
 | Auto Summon Pets | Off | Context-based premium-pet summoning |
+| Synergy Export | On | Export this character for the Ascension Synergy site |
 
 <details>
 <summary><b>Quest Automation</b></summary>
@@ -225,9 +228,33 @@ active. Options for combat / zone-change / recast delay, a Loot-Transfigurator
 skip, and a custom safe-zone pet. (Wisdomball is only summoned in Normal dungeons.)
 </details>
 
+<details>
+<summary><b>Synergy Export</b></summary>
+
+Produces a copy-pasteable block describing this character for the **Ascension
+Synergy** site's Import character panel. Hit **Generate export**, then click the
+box, Ctrl+A, Ctrl+C.
+
+It's plain `key=value` text rather than a binary blob, so you can read exactly
+what's being shared. Included:
+- **Character stats** *(optional)* — level, applied Path, primary stats (both
+  unbuffed base and current, with a flag if buffs were up), attack/ranged power,
+  spell power, crit, weapon damage and speeds, and the level's AE/TE budgets.
+- **Abilities and talents** — everything you've learned, with ranks.
+- **In-game build code** *(optional)* — the game's own `ExportBuild` string, so
+  the build can be re-imported in game.
+</details>
+
 ## Releases
 Pushing a `vX.Y.Z` tag triggers a GitHub Action that packages the addon and
 publishes a Release with a ready-to-extract zip. See `.github/workflows/release.yml`.
+
+## Credits
+**HKSuite by Nodding.** Bug reports and suggestions are welcome on the
+[issue tracker](https://github.com/mhalgaard/HKSuite-Ascension/issues).
+
+Third-party code this suite builds on:
+- **Auto-Grab Vanity** — grab logic ported from *XanAscTweaks*.
 
 ## Development
 See `CLAUDE.md` for conventions. New modules register with a `key`/`title` (so

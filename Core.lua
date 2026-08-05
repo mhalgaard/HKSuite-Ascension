@@ -2,9 +2,10 @@ local ADDON, ns = ...
 
 -- Shared namespace for all modules in the suite.
 ns.name = "HKSuite"
+ns.author = "Nodding"
 -- Fallback only: the settings window reads the .toc via GetAddOnMetadata, which
 -- the release workflow rewrites from the tag. Keep this in step with the .toc.
-ns.version = "2.2.0"
+ns.version = "2.3.0"
 ns.modules = {}
 ns.defaults = {}   -- modules populate this at file-load time
 
